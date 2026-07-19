@@ -26,7 +26,7 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 5;
+  formatVersion: 6;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
   dataset: string;
@@ -34,18 +34,22 @@ type DictionaryManifest = {
   searchableEntries: number;
   filteredInflectionEntries: number;
   aliases: number;
-  minFullQueryLength: number;
   bootstrapFile: string;
-  bootstrapAliases: number;
+  bootstrapPrefixes: number;
+  bootstrapRecords: number;
+  bootstrapCandidatePrefixes: number;
+  bootstrapBytes: number;
+  bootstrapBudgetBytes: number;
+  bootstrapMinSearchBytes: number;
+  bootstrapMinMatchingAliases: number;
   searchShards: SearchShard[];
   records: { span: number; files: string[] };
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v5",
-  "/data/releases/core-20260428-v5",
+  "/data/releases/full-20260428-v6",
+  "/data/releases/core-20260428-v6",
 ];
-const MAX_FULL_ALIASES_FOR_SHORT_QUERY = 10_000;
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
 const MAX_CODE_POINT = String.fromCodePoint(0x10ffff);
@@ -55,6 +59,7 @@ type SearchPlan = {
   initialShardFiles: string[];
   allShardFiles: string[];
   deferredFullSearch: boolean;
+  bootstrapIds: number[] | null;
 };
 
 type SearchSession = {
@@ -69,7 +74,7 @@ let mode: "sample" | "sharded" = "sample";
 let dictionaryBase = "";
 let dictionaryManifest: DictionaryManifest | null = null;
 let sampleAliases: Alias[] = [];
-let bootstrapAliases: Alias[] = [];
+let bootstrapResults = new Map<string, number[]>();
 let entries = new Map<number, Entry>();
 let searchCache = new Map<string, Promise<Alias[]>>();
 let recordCache = new Map<number, Promise<void>>();
@@ -141,7 +146,7 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 5 ||
+      dictionaryManifest.formatVersion !== 6 ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
       dictionaryManifest.headwordFilter !== "dictionary-form-word-id"
     ) {
@@ -151,7 +156,9 @@ async function loadData() {
     mode = "sharded";
     const bootstrapResponse = await fetch(`${base}/${dictionaryManifest.bootstrapFile}`);
     if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    bootstrapAliases = decodeAliases(await bootstrapResponse.arrayBuffer(), 5);
+    const bootstrap = decodeBootstrap(await bootstrapResponse.arrayBuffer());
+    bootstrapResults = bootstrap.results;
+    entries = bootstrap.entries;
     return;
   }
 
@@ -187,9 +194,12 @@ async function startSearch(requestId: number, rawQuery: string) {
   let deferredFullSearch = false;
   if (mode === "sharded") {
     const plan = createSearchPlan(rawQuery);
-    const loaded = await Promise.all(plan.initialShardFiles.map(loadSearchShard));
-    const aliasSets = plan.deferredFullSearch ? [bootstrapAliases, ...loaded] : loaded;
-    rankedIds = rankCandidates(aliasSets, plan.variants);
+    if (plan.bootstrapIds) {
+      rankedIds = plan.bootstrapIds;
+    } else {
+      const loaded = await Promise.all(plan.initialShardFiles.map(loadSearchShard));
+      rankedIds = rankCandidates(loaded, plan.variants);
+    }
     deferredFullSearch = plan.deferredFullSearch;
   } else {
     rankedIds = rankSampleCandidates(queryVariants(rawQuery));
@@ -230,17 +240,15 @@ function createSearchPlan(rawQuery: string): SearchPlan {
   const manifest = dictionaryManifest!;
   const query = normalize(rawQuery);
   const variants = queryVariants(query);
+  const bootstrapIds = bootstrapResults.get(toHiragana(query)) ?? null;
   const initialShardFiles = new Set<string>();
   const allShardFiles = new Set<string>();
-  let deferredFullSearch = false;
+  const deferredFullSearch = bootstrapIds !== null;
 
   for (const variant of variants) {
     const shards = routeShards(manifest.searchShards, variant);
     for (const shard of shards) allShardFiles.add(shard.file);
-    const aliasCount = shards.reduce((total, shard) => total + shard.aliases, 0);
-    if ([...variant].length < manifest.minFullQueryLength && aliasCount > MAX_FULL_ALIASES_FOR_SHORT_QUERY) {
-      deferredFullSearch = true;
-    } else {
+    if (!deferredFullSearch) {
       for (const shard of shards) initialShardFiles.add(shard.file);
     }
   }
@@ -250,6 +258,7 @@ function createSearchPlan(rawQuery: string): SearchPlan {
     initialShardFiles: [...initialShardFiles],
     allShardFiles: [...allShardFiles],
     deferredFullSearch,
+    bootstrapIds,
   };
 }
 
@@ -283,7 +292,7 @@ async function hydrateResults(selectedIds: number[]) {
   if (mode === "sample") {
     return selectedIds.map((id) => entries.get(id)).filter(Boolean).map((entry) => toResult(entry!));
   }
-  await loadRecordIds(selectedIds);
+  await loadRecordIds(selectedIds.filter((id) => !entries.has(id)));
   return selectedIds.map((id) => toResult(entries.get(id)!)).filter(Boolean);
 }
 
@@ -299,7 +308,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 5);
+      return decodeAliases(await response.arrayBuffer(), 6);
     });
     searchCache.set(file, promise);
   }
@@ -316,7 +325,7 @@ async function loadRecordIds(ids: number[]) {
       if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
       promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
         if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 5)) {
+        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 6)) {
           entries.set(id, entry);
         }
       });
@@ -432,33 +441,21 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 5) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 6) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
   const count = reader.u32();
   const decoded = new Map<number, Entry>();
   for (let index = 0; index < count; index += 1) {
-    const id = reader.u32();
-    const cost = version === 2 ? reader.u16() : reader.i16();
-    const surface = reader.string();
-    const readingForm = reader.string();
-    const normalizedForm = reader.string();
-    const dictionaryForm = reader.string();
-    const pos = reader.string();
-    const aBoundaries = reader.boundaries();
-    const bBoundaries = reader.boundaries();
-    const structureBoundaries = reader.boundaries();
-    decoded.set(id, {
-      id, cost, surface, readingForm, normalizedForm, dictionaryForm, pos,
-      aBoundaries, bBoundaries, structureBoundaries,
-    });
+    const [id, entry] = decodeEntry(reader, version);
+    decoded.set(id, entry);
   }
   reader.done();
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 5) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 6) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -474,6 +471,54 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 5) {
   }
   reader.done();
   return decoded;
+}
+
+function decodeBootstrap(buffer: ArrayBuffer) {
+  const reader = new BinaryReader(buffer);
+  reader.magic("SDBP");
+  reader.version(6);
+  const count = reader.u32();
+  const results = new Map<string, number[]>();
+  for (let index = 0; index < count; index += 1) {
+    const prefix = reader.string();
+    const resultCount = reader.u8();
+    const ids = [];
+    for (let resultIndex = 0; resultIndex < resultCount; resultIndex += 1) {
+      ids.push(reader.u32());
+    }
+    if (results.has(prefix)) throw new Error(`Duplicate bootstrap prefix: ${prefix}`);
+    results.set(prefix, ids);
+  }
+  const recordCount = reader.u32();
+  const bootstrapEntries = new Map<number, Entry>();
+  for (let index = 0; index < recordCount; index += 1) {
+    const [id, entry] = decodeEntry(reader, 6);
+    bootstrapEntries.set(id, entry);
+  }
+  reader.done();
+  for (const [prefix, ids] of results) {
+    if (ids.some((id) => !bootstrapEntries.has(id))) {
+      throw new Error(`Bootstrap results are missing records for ${prefix}`);
+    }
+  }
+  return { results, entries: bootstrapEntries };
+}
+
+function decodeEntry(reader: BinaryReader, version: 2 | 6): [number, Entry] {
+  const id = reader.u32();
+  const cost = version === 2 ? reader.u16() : reader.i16();
+  const surface = reader.string();
+  const readingForm = reader.string();
+  const normalizedForm = reader.string();
+  const dictionaryForm = reader.string();
+  const pos = reader.string();
+  const aBoundaries = reader.boundaries();
+  const bBoundaries = reader.boundaries();
+  const structureBoundaries = reader.boundaries();
+  return [id, {
+    id, cost, surface, readingForm, normalizedForm, dictionaryForm, pos,
+    aBoundaries, bBoundaries, structureBoundaries,
+  }];
 }
 
 class BinaryReader {

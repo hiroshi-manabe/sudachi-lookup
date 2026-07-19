@@ -182,21 +182,26 @@ unless testing shows that behavior is useful.
 
 ### 7.1 Two-tier lookup
 
-One-character Japanese prefixes can represent very large portions of the
-dictionary. Loading their complete postings would make the first keystroke the
-worst request.
+Some Japanese prefixes represent very large portions of the dictionary even
+after more than one character. Loading their complete postings would make those
+keystrokes disproportionately slow.
 
 The application will therefore use two tiers:
 
-1. **Bootstrap suggestions:** a small eagerly loaded index containing a limited
-   number of high-quality results for short prefixes.
+1. **Bootstrap suggestions:** a small eagerly loaded index containing the
+   precomputed top 20 results and their display records for prefixes whose full
+   search is expensive.
 2. **Full prefix shards:** lazily loaded sorted aliases for queries long enough
    to route to a reasonably bounded data partition, or when the user continues
    beyond the bootstrap results for a broad query.
 
-The exact transition—probably one versus two or more characters—will be chosen
-from generated size statistics rather than hard-coded as an architectural
-assumption.
+Format v6 makes the transition from generated cost statistics rather than
+query length. A prefix is eligible when its routed search data is at least 192
+KiB and it matches at least 500 aliases. Eligible prefixes are prioritized by
+the combined search- and record-shard transfer they avoid, then encoded under a
+hard 1 MiB budget. Records shared by multiple prefixes are stored only once.
+Hiragana and katakana variants share one bootstrap key. Continuation still
+expands into complete prefix shards.
 
 ### 7.2 Shard routing
 
@@ -310,8 +315,8 @@ Pinned edition and release
     -> resolve A/B split information
     -> normalize and generate search aliases
     -> intern repeated strings and POS values
-    -> build bootstrap suggestions
     -> build and size-balance prefix shards
+    -> measure prefix cost and build budgeted bootstrap results
     -> build record shards
     -> emit manifest, hashes, statistics, and notices
     -> run integrity and search fixtures
@@ -328,13 +333,17 @@ The manifest should contain at least:
 
 ```json
 {
-  "formatVersion": 1,
+  "formatVersion": 6,
   "dictionary": {
     "edition": "core",
     "version": "20260428"
   },
   "generatorVersion": "0.1.0",
-  "bootstrap": "bootstrap.ab12cd.bin",
+  "bootstrapFile": "bootstrap.bin",
+  "bootstrapPrefixes": 546,
+  "bootstrapRecords": 10205,
+  "bootstrapBytes": 1048527,
+  "bootstrapBudgetBytes": 1048576,
   "routing": "prefix routing data",
   "recordPartitioning": "record partition metadata"
 }

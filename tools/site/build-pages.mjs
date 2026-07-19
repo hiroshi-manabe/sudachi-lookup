@@ -38,12 +38,12 @@ function datasetForEdition(value) {
       version: 2,
     };
   }
-  const name = `${value}-20260428-v5`;
+  const name = `${value}-20260428-v6`;
   return {
     source: resolve(root, "public/data/releases", name),
     destination: resolve(outputDirectory, "data/releases", name),
     manifest: `data/releases/${name}/manifest.json`,
-    version: 5,
+    version: 6,
   };
 }
 

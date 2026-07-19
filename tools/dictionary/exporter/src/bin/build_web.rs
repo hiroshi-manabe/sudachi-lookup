@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     env,
     error::Error,
     fs::{self, File},
@@ -13,10 +13,13 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 5;
+const FORMAT_VERSION: u16 = 6;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
-const BOOTSTRAP_PER_FIRST_CHARACTER: usize = 64;
+const INITIAL_RESULTS: usize = 20;
+const BOOTSTRAP_BUDGET_BYTES: usize = 1024 * 1024;
+const BOOTSTRAP_MIN_SEARCH_BYTES: u64 = 192 * 1024;
+const BOOTSTRAP_MIN_MATCHING_ALIASES: usize = 500;
 
 #[derive(Deserialize)]
 struct SourceEntry {
@@ -56,6 +59,23 @@ struct Alias {
     surface_length: u16,
 }
 
+struct BootstrapEntry {
+    prefix: String,
+    ids: Vec<u32>,
+    matching_aliases: usize,
+    search_bytes: u64,
+    search_shards: usize,
+    record_shards: usize,
+    record_bytes: u64,
+}
+
+struct BootstrapBuild {
+    entries: Vec<BootstrapEntry>,
+    record_ids: Vec<u32>,
+    candidate_prefixes: usize,
+    bytes: u64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SearchShard {
@@ -92,9 +112,14 @@ struct Manifest {
     searchable_entries: u64,
     filtered_inflection_entries: u64,
     aliases: usize,
-    min_full_query_length: usize,
     bootstrap_file: String,
-    bootstrap_aliases: usize,
+    bootstrap_prefixes: usize,
+    bootstrap_records: usize,
+    bootstrap_candidate_prefixes: usize,
+    bootstrap_bytes: u64,
+    bootstrap_budget_bytes: usize,
+    bootstrap_min_search_bytes: u64,
+    bootstrap_min_matching_aliases: usize,
     search_shards: Vec<SearchShard>,
     records: RecordManifest,
     search_size: SizeStats,
@@ -164,6 +189,16 @@ fn to_hiragana(value: &str) -> String {
         .chars()
         .map(|character| match character as u32 {
             code @ 0x30a1..=0x30f6 => char::from_u32(code - 0x60).unwrap_or(character),
+            _ => character,
+        })
+        .collect()
+}
+
+fn to_katakana(value: &str) -> String {
+    value
+        .chars()
+        .map(|character| match character as u32 {
+            code @ 0x3041..=0x3096 => char::from_u32(code + 0x60).unwrap_or(character),
             _ => character,
         })
         .collect()
@@ -301,6 +336,38 @@ fn write_alias_file(path: &Path, aliases: &[Alias]) -> Result<u64, Box<dyn Error
     write_file(path, &writer.bytes)
 }
 
+fn bootstrap_entry_bytes(entry: &BootstrapEntry) -> usize {
+    2 + entry.prefix.len() + 1 + entry.ids.len() * 4
+}
+
+fn write_bootstrap_file(
+    path: &Path,
+    bootstrap: &BootstrapBuild,
+    input: &Path,
+    surfaces: &[String],
+) -> Result<u64, Box<dyn Error>> {
+    let selected_ids: HashSet<u32> = bootstrap.record_ids.iter().copied().collect();
+    let mut writer = BinaryWriter::new(b"SDBP", bootstrap.entries.len() as u32);
+    for entry in &bootstrap.entries {
+        writer.string(&entry.prefix)?;
+        writer.u8(u8::try_from(entry.ids.len()).map_err(|_| "too many bootstrap results")?);
+        for id in &entry.ids {
+            writer.u32(*id);
+        }
+    }
+    writer.u32(bootstrap.record_ids.len() as u32);
+    for line in source_reader(input)?.lines() {
+        let entry: SourceEntry = serde_json::from_str(&line?)?;
+        if selected_ids.contains(&entry.word_id) {
+            write_record(&mut writer, &entry, surfaces)?;
+        }
+    }
+    if writer.bytes.len() > BOOTSTRAP_BUDGET_BYTES {
+        return Err("bootstrap exceeds byte budget".into());
+    }
+    write_file(path, &writer.bytes)
+}
+
 fn alias_order(left: &Alias, right: &Alias) -> Ordering {
     left.key
         .cmp(&right.key)
@@ -313,48 +380,168 @@ fn match_score(alias: &Alias, query: &str) -> u8 {
     exact + [0, 4, 2, 6][alias.kind as usize]
 }
 
-fn result_order(query: &str, left: &Alias, right: &Alias) -> Ordering {
-    match_score(left, query)
-        .cmp(&match_score(right, query))
-        .then(left.cost.cmp(&right.cost))
-        .then(left.surface_length.cmp(&right.surface_length))
-        .then(left.id.cmp(&right.id))
+fn query_variants(prefix: &str) -> Vec<String> {
+    let mut variants = vec![prefix.to_owned(), to_hiragana(prefix), to_katakana(prefix)];
+    variants.sort_unstable();
+    variants.dedup();
+    variants
 }
 
-fn build_bootstrap(aliases: &[Alias]) -> Vec<Alias> {
-    let mut grouped: HashMap<char, Vec<&Alias>> = HashMap::new();
-    for alias in aliases {
-        if let Some(first) = alias.key.chars().next() {
-            grouped.entry(first).or_default().push(alias);
-        }
-    }
-    let mut bootstrap = Vec::new();
-    for (first, values) in grouped {
-        if values.len() <= MAX_ALIASES_PER_SHARD {
-            continue;
-        }
-        let query = first.to_string();
-        let mut best_by_entry: HashMap<u32, &Alias> = HashMap::new();
-        for alias in values {
-            let best = best_by_entry.entry(alias.id).or_insert(alias);
-            if result_order(&query, alias, best).is_lt() {
-                *best = alias;
+fn prefix_range(aliases: &[Alias], prefix: &str) -> std::ops::Range<usize> {
+    let start = aliases.partition_point(|alias| alias.key.as_str() < prefix);
+    let mut upper = prefix.to_owned();
+    upper.push(char::MAX);
+    let end = aliases.partition_point(|alias| alias.key.as_str() <= upper.as_str());
+    start..end
+}
+
+fn bootstrap_ranges(aliases: &[Alias], prefix: &str) -> Vec<(String, std::ops::Range<usize>)> {
+    query_variants(prefix)
+        .into_iter()
+        .filter_map(|variant| {
+            let range = prefix_range(aliases, &variant);
+            (!range.is_empty()).then_some((variant, range))
+        })
+        .collect()
+}
+
+fn rank_prefix(aliases: &[Alias], ranges: &[(String, std::ops::Range<usize>)]) -> Vec<u32> {
+    let mut best_by_entry: HashMap<u32, (u8, &Alias)> = HashMap::new();
+    for (variant, range) in ranges {
+        for alias in &aliases[range.clone()] {
+            let score = match_score(alias, variant);
+            let best = best_by_entry.entry(alias.id).or_insert((score, alias));
+            if score < best.0 {
+                *best = (score, alias);
             }
         }
-        let mut values: Vec<&Alias> = best_by_entry.into_values().collect();
-        values.sort_unstable_by(|left, right| result_order(&query, left, right));
-        bootstrap.extend(
-            values
-                .iter()
-                .take(BOOTSTRAP_PER_FIRST_CHARACTER)
-                .map(|alias| (*alias).clone()),
-        );
     }
-    bootstrap.sort_unstable_by(alias_order);
-    bootstrap.dedup_by(|left, right| {
-        left.key == right.key && left.id == right.id && left.kind == right.kind
+    let mut ranked: Vec<(u8, &Alias)> = best_by_entry.into_values().collect();
+    ranked.sort_unstable_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(left.1.cost.cmp(&right.1.cost))
+            .then(left.1.surface_length.cmp(&right.1.surface_length))
+            .then(left.1.id.cmp(&right.1.id))
     });
-    bootstrap
+    ranked
+        .into_iter()
+        .take(INITIAL_RESULTS)
+        .map(|(_, alias)| alias.id)
+        .collect()
+}
+
+fn build_bootstrap(
+    aliases: &[Alias],
+    search_sizes: &[u64],
+    record_sizes: &[u64],
+    record_entry_sizes: &[usize],
+) -> BootstrapBuild {
+    let mut initial_prefixes = HashSet::new();
+    for alias in aliases {
+        if let Some(first) = alias.key.chars().next() {
+            initial_prefixes.insert(to_hiragana(&first.to_string()));
+        }
+    }
+    let mut queue: VecDeque<String> = initial_prefixes.into_iter().collect();
+    let mut visited = HashSet::new();
+    let mut candidates = Vec::new();
+
+    while let Some(prefix) = queue.pop_front() {
+        if !visited.insert(prefix.clone()) {
+            continue;
+        }
+        let ranges = bootstrap_ranges(aliases, &prefix);
+        let matching_aliases = ranges.iter().map(|(_, range)| range.len()).sum();
+        if matching_aliases < BOOTSTRAP_MIN_MATCHING_ALIASES {
+            continue;
+        }
+        let mut shard_indexes = HashSet::new();
+        for (_, range) in &ranges {
+            if !range.is_empty() {
+                for index in
+                    range.start / MAX_ALIASES_PER_SHARD..=((range.end - 1) / MAX_ALIASES_PER_SHARD)
+                {
+                    shard_indexes.insert(index);
+                }
+            }
+        }
+        let search_bytes = shard_indexes.iter().map(|index| search_sizes[*index]).sum();
+        if search_bytes < BOOTSTRAP_MIN_SEARCH_BYTES {
+            continue;
+        }
+
+        let ids = rank_prefix(aliases, &ranges);
+        let record_shards: HashSet<u32> = ids.iter().map(|id| id / RECORD_SPAN).collect();
+        let record_bytes = record_shards
+            .iter()
+            .map(|index| record_sizes[*index as usize])
+            .sum();
+        candidates.push(BootstrapEntry {
+            prefix: prefix.clone(),
+            ids,
+            matching_aliases,
+            search_bytes,
+            search_shards: shard_indexes.len(),
+            record_shards: record_shards.len(),
+            record_bytes,
+        });
+
+        let prefix_length = prefix.chars().count();
+        let mut children = HashSet::new();
+        for (_, range) in &ranges {
+            for alias in &aliases[range.clone()] {
+                let canonical = to_hiragana(&alias.key);
+                if canonical.starts_with(&prefix) && canonical.chars().count() > prefix_length {
+                    children.insert(
+                        canonical
+                            .chars()
+                            .take(prefix_length + 1)
+                            .collect::<String>(),
+                    );
+                }
+            }
+        }
+        queue.extend(children);
+    }
+
+    let candidate_prefixes = candidates.len();
+    candidates.sort_unstable_by(|left, right| {
+        right
+            .search_bytes
+            .saturating_add(right.record_bytes)
+            .cmp(&left.search_bytes.saturating_add(left.record_bytes))
+            .then(right.matching_aliases.cmp(&left.matching_aliases))
+            .then(right.search_shards.cmp(&left.search_shards))
+            .then(right.record_shards.cmp(&left.record_shards))
+            .then(left.prefix.cmp(&right.prefix))
+    });
+    let mut bytes = 14_usize;
+    let mut selected = Vec::new();
+    let mut selected_record_ids = HashSet::new();
+    for candidate in candidates {
+        let candidate_bytes = bootstrap_entry_bytes(&candidate)
+            + candidate
+                .ids
+                .iter()
+                .filter(|id| !selected_record_ids.contains(*id))
+                .map(|id| record_entry_sizes[*id as usize])
+                .sum::<usize>();
+        if bytes + candidate_bytes <= BOOTSTRAP_BUDGET_BYTES {
+            bytes += candidate_bytes;
+            selected_record_ids.extend(candidate.ids.iter().copied());
+            selected.push(candidate);
+        }
+    }
+    selected.sort_unstable_by(|left, right| left.prefix.cmp(&right.prefix));
+    let mut record_ids: Vec<u32> = selected_record_ids.into_iter().collect();
+    record_ids.sort_unstable();
+    BootstrapBuild {
+        entries: selected,
+        record_ids,
+        candidate_prefixes,
+        bytes: bytes as u64,
+    }
 }
 
 fn stats(mut sizes: Vec<u64>) -> SizeStats {
@@ -462,6 +649,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     let mut entries = 0_u64;
     let mut record_files = Vec::new();
     let mut record_sizes = Vec::new();
+    let mut record_entry_sizes = Vec::new();
     let mut record_entries = Vec::with_capacity(RECORD_SPAN as usize);
 
     for line in source_reader(input)?.lines() {
@@ -495,6 +683,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
                 output,
                 &mut record_files,
                 &mut record_sizes,
+                &mut record_entry_sizes,
                 &mut record_entries,
                 &source.surfaces,
             )?;
@@ -505,6 +694,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             output,
             &mut record_files,
             &mut record_sizes,
+            &mut record_entry_sizes,
             &mut record_entries,
             &source.surfaces,
         )?;
@@ -514,10 +704,6 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     aliases.dedup_by(|left, right| {
         left.key == right.key && left.id == right.id && left.kind == right.kind
     });
-
-    let bootstrap = build_bootstrap(&aliases);
-    let bootstrap_file = "bootstrap.bin".to_owned();
-    write_alias_file(&output.join(&bootstrap_file), &bootstrap)?;
 
     let mut search_shards = Vec::with_capacity(aliases.len().div_ceil(MAX_ALIASES_PER_SHARD));
     let mut search_sizes = Vec::with_capacity(search_shards.capacity());
@@ -535,6 +721,18 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         });
     }
 
+    let bootstrap = build_bootstrap(&aliases, &search_sizes, &record_sizes, &record_entry_sizes);
+    let bootstrap_file = "bootstrap.bin".to_owned();
+    let bootstrap_bytes = write_bootstrap_file(
+        &output.join(&bootstrap_file),
+        &bootstrap,
+        input,
+        &source.surfaces,
+    )?;
+    if bootstrap_bytes != bootstrap.bytes {
+        return Err("bootstrap size calculation does not match encoded file".into());
+    }
+
     let manifest = Manifest {
         format_version: FORMAT_VERSION,
         dataset,
@@ -542,9 +740,14 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         searchable_entries: source.searchable_entries,
         filtered_inflection_entries: entries - source.searchable_entries,
         aliases: aliases.len(),
-        min_full_query_length: 2,
         bootstrap_file,
-        bootstrap_aliases: bootstrap.len(),
+        bootstrap_prefixes: bootstrap.entries.len(),
+        bootstrap_records: bootstrap.record_ids.len(),
+        bootstrap_candidate_prefixes: bootstrap.candidate_prefixes,
+        bootstrap_bytes,
+        bootstrap_budget_bytes: BOOTSTRAP_BUDGET_BYTES,
+        bootstrap_min_search_bytes: BOOTSTRAP_MIN_SEARCH_BYTES,
+        bootstrap_min_matching_aliases: BOOTSTRAP_MIN_MATCHING_ALIASES,
         search_shards,
         records: RecordManifest {
             span: RECORD_SPAN,
@@ -564,12 +767,15 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     manifest_output.flush()?;
 
     eprintln!(
-        "built {} searchable entries from {} records, {} aliases, {} search shards, and {} record shards in {:.1}s",
+        "built {} searchable entries from {} records, {} aliases, {} search shards, {} record shards, and {} of {} expensive bootstrap prefixes ({} bytes) in {:.1}s",
         manifest.searchable_entries,
         manifest.entries,
         manifest.aliases,
         manifest.search_shards.len(),
         manifest.records.files.len(),
+        manifest.bootstrap_prefixes,
+        manifest.bootstrap_candidate_prefixes,
+        manifest.bootstrap_bytes,
         manifest.elapsed_seconds
     );
     Ok(())
@@ -579,6 +785,7 @@ fn flush_records(
     output: &Path,
     files: &mut Vec<String>,
     sizes: &mut Vec<u64>,
+    entry_sizes: &mut Vec<usize>,
     entries: &mut Vec<SourceEntry>,
     surfaces: &[String],
 ) -> Result<(), Box<dyn Error>> {
@@ -587,7 +794,9 @@ fn flush_records(
     fs::create_dir_all(output.join("records"))?;
     let mut writer = BinaryWriter::new(b"SDRE", entries.len() as u32);
     for entry in entries.iter() {
+        let start = writer.bytes.len();
         write_record(&mut writer, entry, surfaces)?;
+        entry_sizes.push(writer.bytes.len() - start);
     }
     sizes.push(write_file(&output.join(&file), &writer.bytes)?);
     files.push(file);
@@ -628,6 +837,7 @@ mod tests {
     #[test]
     fn reading_aliases_include_hiragana() {
         assert_eq!(to_hiragana("センキョ"), "せんきょ");
+        assert_eq!(to_katakana("せんきょ"), "センキョ");
     }
 
     fn entry(surface: &str, split: Vec<u32>) -> SourceEntry {
@@ -682,6 +892,8 @@ mod tests {
             cost: -924,
             surface_length: 10,
         };
-        assert!(result_order("い", &exact, &prefix).is_lt());
+        let aliases = vec![exact, prefix];
+        let ranges = bootstrap_ranges(&aliases, "い");
+        assert_eq!(rank_prefix(&aliases, &ranges), vec![1, 2]);
     }
 }

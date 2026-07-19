@@ -11,7 +11,7 @@ const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
 const input = resolve(root, "reports", release, "entries.jsonl.gz");
-const dataset = `${release}-v5`;
+const dataset = `${release}-v6`;
 const output = resolve(root, "public/data/releases", dataset);
 
 if (!existsSync(cargo)) {
