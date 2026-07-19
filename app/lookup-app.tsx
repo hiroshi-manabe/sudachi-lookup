@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
 
 const INITIAL_QUERY = "選挙";
+type SearchState = "loading" | "searching" | "settled" | "error";
 
 export function LookupApp() {
   const workerRef = useRef<Worker | null>(null);
@@ -22,6 +23,7 @@ export function LookupApp() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [automaticLoadBlocked, setAutomaticLoadBlocked] = useState(false);
+  const [searchState, setSearchState] = useState<SearchState>("loading");
 
   useEffect(() => {
     const initialQuery = queryFromLocation();
@@ -49,6 +51,7 @@ export function LookupApp() {
         loadingMoreRequestRef.current = false;
         setLoadingMore(false);
         setAutomaticLoadBlocked(false);
+        setSearchState("settled");
         if (!message.append) {
           setActiveIndex(0);
           setExpandedId(null);
@@ -58,6 +61,7 @@ export function LookupApp() {
         loadingMoreRequestRef.current = false;
         setLoadingMore(false);
         setAutomaticLoadBlocked(true);
+        setSearchState("error");
         setStatus(message.message);
       }
     };
@@ -106,6 +110,10 @@ export function LookupApp() {
     if (!worker) return;
     const requestId = ++requestIdRef.current;
     loadingMoreRequestRef.current = false;
+    setSearchState("searching");
+    setResults([]);
+    setActiveIndex(0);
+    setExpandedId(null);
     setHasMore(false);
     setLoadingMore(false);
     setAutomaticLoadBlocked(false);
@@ -202,12 +210,22 @@ export function LookupApp() {
         </div>
       </section>
 
-      <section aria-labelledby="results-heading" aria-live="polite">
+      <section
+        aria-labelledby="results-heading"
+        aria-live="polite"
+        aria-busy={searchState === "loading" || searchState === "searching"}
+      >
         <div className="results-header">
           <h2 className="results-title" id="results-heading">Matches</h2>
-          <span className="result-count">
-            {results.length}{hasMore ? "+" : ""} {results.length === 1 ? "result" : "results"}
-          </span>
+          <span className="result-count">{
+            searchState === "loading"
+              ? "Loading…"
+              : searchState === "searching"
+                ? "Searching…"
+                : searchState === "error"
+                  ? "Unavailable"
+                  : `${results.length}${hasMore ? "+" : ""} ${results.length === 1 ? "result" : "results"}`
+          }</span>
         </div>
 
         <div className="results" id="lookup-results" role="list">
@@ -267,7 +285,17 @@ export function LookupApp() {
               </article>
             );
           })}
-          {!results.length ? <div className="empty">No prefix matches.</div> : null}
+          {!results.length ? (
+            <div className="empty">{
+              searchState === "loading"
+                ? "Loading dictionary…"
+                : searchState === "searching"
+                  ? "Searching…"
+                  : searchState === "error"
+                    ? "Search unavailable."
+                    : "No prefix matches."
+            }</div>
+          ) : null}
         </div>
         {results.length ? (
           <div className="result-continuation">
