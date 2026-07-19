@@ -2,7 +2,7 @@
 
 ## Decision
 
-Browser data format v4 will store Structure, A, and B segmentation as
+Browser data format v4 stores Structure, A, and B segmentation as
 cumulative Unicode code-point boundaries within the parent entry's `surface`.
 It will not store referenced word IDs in browser record shards.
 
@@ -39,9 +39,10 @@ Measurements of the pinned `20260428` dictionaries support this representation:
 | Longest surface carrying A/B splits | 133 code points | 133 code points |
 | Surfaces longer than 127 code points | 1 | 1 |
 | Surfaces longer than 255 code points | 0 | 0 |
-| Structure concatenation matches parent | 99.9966% | validated during generation |
-| A concatenation matches parent | 99.9966% | validated during generation |
-| B concatenation matches parent | 99.9945% | validated during generation |
+| Component lengths cover parent | 100% | 100% |
+| Structure text concatenates exactly | 99.9966% | not required by the encoding |
+| A text concatenates exactly | 99.9966% | not required by the encoding |
+| B text concatenates exactly | 99.9945% | not required by the encoding |
 
 The 28 Core text mismatches are capitalization variants such as parent
 `Aiロボティクス` versus referenced components `AI` and `ロボティクス`.
@@ -87,3 +88,18 @@ A cold search becomes:
 Split rows remain visually collapsed until requested, but opening them requires
 no additional network access.
 
+## Implemented result
+
+Both pinned editions pass v4 generation and validation. Search partitioning and
+alias payloads are unchanged; binary headers and the manifest carry the new
+format version.
+
+| Measurement | Core v3 | Core v4 | Full v3 | Full v4 |
+| --- | ---: | ---: | ---: | ---: |
+| Record data | 252,802,733 B | 232,461,377 B | 471,957,614 B | 427,577,506 B |
+| Total dictionary data | 489,621,289 B | 469,279,985 B | 913,268,231 B | 868,888,170 B |
+| Median record shard | 284,923 B | 268,285 B | 319,925 B | 282,811 B |
+| Maximum record shard | 694,203 B | 588,426 B | 694,203 B | 588,426 B |
+
+The change saves 20,341,304 bytes in Core and 44,380,061 bytes in Full while
+also removing the second record-loading round from ordinary result hydration.

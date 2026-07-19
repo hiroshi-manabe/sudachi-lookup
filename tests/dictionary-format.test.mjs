@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { buildSample } from "../tools/dictionary/build-sample.mjs";
+import { buildSample, splitBoundaries } from "../tools/dictionary/build-sample.mjs";
 
 test("builds a deterministic binary sample with valid split references", async () => {
   const first = await buildSample();
@@ -15,9 +15,13 @@ test("builds a deterministic binary sample with valid split references", async (
   const electionCommittee = first.entries.find((entry) => entry.surface === "選挙管理委員会");
   assert.deepEqual(electionCommittee.aSplit, [1, 2, 3, 4]);
   assert.deepEqual(electionCommittee.bSplit, [1, 2, 5]);
+  const surfaces = new Map(first.entries.map((entry) => [entry.id, entry.surface]));
+  assert.deepEqual(splitBoundaries(electionCommittee.surface, electionCommittee.aSplit, surfaces), [2, 4, 6]);
+  assert.deepEqual(splitBoundaries(electionCommittee.surface, electionCommittee.bSplit, surfaces), [2, 4]);
 
   const index = await readFile("public/data/sample/index.bin");
   assert.equal(index.subarray(0, 4).toString("utf8"), "SDIX");
+  assert.equal(index.readUInt16LE(4), 2);
 });
 
 test("indexes normalized, dictionary, and both kana reading forms", async () => {

@@ -149,6 +149,13 @@ The current v3 format deliberately favors a simple, testable encoding. String
 and POS interning should be evaluated only if hosted transfer or browser-memory
 measurements show that the additional decoder complexity is worthwhile.
 
+Format v4 retains that simple layout while replacing Structure and A/B word-ID
+arrays with one-byte cumulative code-point boundaries. This reduces Core record
+data from 252,802,733 to 232,461,377 bytes and Full record data from 471,957,614
+to 427,577,506 bytes. More importantly, visible results no longer fetch full
+records for their Structure and split components; the parent record alone can
+render every component surface.
+
 ## Full edition measurement
 
 The identical pinned pipeline was run against SudachiDict Full `20260428`. No

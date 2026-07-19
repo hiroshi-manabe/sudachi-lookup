@@ -10,11 +10,13 @@ domain. It requires no application server, search API, or hosted database.
 
 ## Project status
 
-The local vertical slice, complete SudachiDict Core/Full exporter, and first
-range-sharded browser format are implemented. Format v3 preserves Structure and
-A/B relationships, and the interface supports navigable compound components,
-mode badges, and mode-specific expansion. The browser prefers generated Full or
-Core assets when present and otherwise falls back to the deterministic fixture.
+The local vertical slice, complete SudachiDict Core/Full exporter, and
+range-sharded browser format are implemented. Format v4 stores Structure and
+A/B segmentation as eager one-byte boundaries in each parent record. The
+interface supports navigable compound components, mode badges, and
+mode-specific expansion without loading component records. The browser prefers
+generated Full or Core assets when present and otherwise falls back to the
+deterministic fixture.
 
 The proposed first release will provide:
 
@@ -40,7 +42,7 @@ Offline extractor and index builder
         |
         +-- manifest and bootstrap suggestions
         +-- prefix-search shards
-        +-- entry-detail shards with Structure and A/B references
+        +-- entry-detail shards with Structure and A/B boundaries
         |
         v
 Cloudflare Pages

@@ -2,10 +2,10 @@
 
 ## Status
 
-Implemented locally in browser data format v3. Format v4 replaces browser-side
-Structure and A/B word-ID references with eager one-byte boundaries, as defined
-in [Compact Split Boundary Format](split-boundary-format.md). The interaction,
-history, expansion, and accessibility model remains unchanged.
+Implemented in browser data format v4. Structure and A/B word-ID references are
+resolved offline to eager one-byte boundaries, as defined in
+[Compact Split Boundary Format](split-boundary-format.md). The interaction,
+history, expansion, and accessibility model is unchanged from the v3 prototype.
 
 ## Purpose
 

@@ -13,7 +13,7 @@ export async function buildSample() {
   const entriesBuffer = encodeEntries(entries);
   const indexBuffer = encodeAliases(aliases);
   const manifest = {
-    formatVersion: 1,
+    formatVersion: 2,
     dataset: "sample",
     entries: entries.length,
     aliases: aliases.length,
@@ -32,9 +32,10 @@ export async function buildSample() {
 }
 
 export function encodeEntries(entries) {
+  const surfaces = new Map(entries.map((entry) => [entry.id, entry.surface]));
   const writer = new BinaryWriter();
   writer.magic("SDLX");
-  writer.u16(1);
+  writer.u16(2);
   writer.u32(entries.length);
   for (const entry of entries) {
     writer.u32(entry.id);
@@ -44,8 +45,13 @@ export function encodeEntries(entries) {
     writer.string(entry.normalizedForm);
     writer.string(entry.dictionaryForm);
     writer.string(entry.pos);
-    writer.ids(entry.aSplit);
-    writer.ids(entry.bSplit);
+    writer.boundaries(splitBoundaries(entry.surface, entry.aSplit, surfaces));
+    writer.boundaries(splitBoundaries(entry.surface, entry.bSplit, surfaces));
+    writer.boundaries(splitBoundaries(
+      entry.surface,
+      entry.bSplit.length ? entry.bSplit : entry.aSplit,
+      surfaces,
+    ));
   }
   return writer.finish();
 }
@@ -53,7 +59,7 @@ export function encodeEntries(entries) {
 export function encodeAliases(aliases) {
   const writer = new BinaryWriter();
   writer.magic("SDIX");
-  writer.u16(1);
+  writer.u16(2);
   writer.u32(aliases.length);
   for (const alias of aliases) {
     writer.string(alias.key);
@@ -61,6 +67,29 @@ export function encodeAliases(aliases) {
     writer.u8(alias.kind);
   }
   return writer.finish();
+}
+
+export function splitBoundaries(surface, ids, surfaces) {
+  if (!ids.length) return [];
+  if (ids.length < 2) throw new Error("A split must contain at least two components");
+  const surfaceLength = [...surface].length;
+  let consumed = 0;
+  const boundaries = [];
+  for (let index = 0; index < ids.length; index += 1) {
+    const component = surfaces.get(ids[index]);
+    if (component === undefined) throw new Error(`Missing split component ${ids[index]}`);
+    consumed += [...component].length;
+    if (index + 1 < ids.length) {
+      if (consumed <= (boundaries.at(-1) ?? 0) || consumed >= surfaceLength || consumed > 0xff) {
+        throw new Error(`Invalid split boundary ${consumed} for ${surface}`);
+      }
+      boundaries.push(consumed);
+    }
+  }
+  if (consumed !== surfaceLength) {
+    throw new Error(`Split components do not cover ${surface}`);
+  }
+  return boundaries;
 }
 
 export function buildAliases(entries) {
@@ -139,10 +168,10 @@ class BinaryWriter {
     this.parts.push(bytes);
   }
 
-  ids(values) {
+  boundaries(values) {
     if (values.length > 0xff) throw new Error("Split exceeds format limit");
     this.u8(values.length);
-    for (const value of values) this.u32(value);
+    for (const value of values) this.u8(value);
   }
 
   finish() {

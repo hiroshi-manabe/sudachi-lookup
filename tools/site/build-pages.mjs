@@ -35,15 +35,15 @@ function datasetForEdition(value) {
       source: resolve(root, "public/data/sample"),
       destination: resolve(outputDirectory, "data/sample"),
       manifest: "data/sample/manifest.json",
-      version: 1,
+      version: 2,
     };
   }
-  const name = `${value}-20260428-v3`;
+  const name = `${value}-20260428-v4`;
   return {
     source: resolve(root, "public/data/releases", name),
     destination: resolve(outputDirectory, "data/releases", name),
     manifest: `data/releases/${name}/manifest.json`,
-    version: 3,
+    version: 4,
   };
 }
 
@@ -84,7 +84,7 @@ async function validateDeployment(selectedDataset) {
   }
 
   const manifestDirectory = resolve(manifestPath, "..");
-  const references = selectedDataset.version === 1
+  const references = selectedDataset.version === 2
     ? [manifest.entriesFile, manifest.indexFile]
     : [
         manifest.bootstrapFile,

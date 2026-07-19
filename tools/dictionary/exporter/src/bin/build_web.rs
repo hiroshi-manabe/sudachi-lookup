@@ -13,7 +13,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 3;
+const FORMAT_VERSION: u16 = 4;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const BOOTSTRAP_PER_FIRST_CHARACTER: usize = 64;
@@ -30,6 +30,12 @@ struct SourceEntry {
     a_split: Vec<u32>,
     b_split: Vec<u32>,
     word_structure: Vec<u32>,
+}
+
+#[derive(Deserialize)]
+struct SurfaceEntry {
+    word_id: u32,
+    surface: String,
 }
 
 #[derive(Clone)]
@@ -82,6 +88,7 @@ struct Manifest {
     records: RecordManifest,
     search_size: SizeStats,
     record_size: SizeStats,
+    split_encoding: &'static str,
     source_sha256: String,
     elapsed_seconds: f64,
 }
@@ -123,12 +130,10 @@ impl BinaryWriter {
         Ok(())
     }
 
-    fn ids(&mut self, values: &[u32]) -> Result<(), Box<dyn Error>> {
+    fn boundaries(&mut self, values: &[u8]) -> Result<(), Box<dyn Error>> {
         let count = u8::try_from(values.len()).map_err(|_| "split exceeds format limit")?;
         self.u8(count);
-        for value in values {
-            self.u32(*value);
-        }
+        self.bytes.extend_from_slice(values);
         Ok(())
     }
 }
@@ -186,7 +191,67 @@ fn add_aliases(aliases: &mut Vec<Alias>, entry: &SourceEntry) {
     }
 }
 
-fn write_record(writer: &mut BinaryWriter, entry: &SourceEntry) -> Result<(), Box<dyn Error>> {
+fn split_boundaries(
+    entry: &SourceEntry,
+    split: &[u32],
+    surfaces: &[String],
+    label: &str,
+) -> Result<Vec<u8>, Box<dyn Error>> {
+    if split.is_empty() {
+        return Ok(Vec::new());
+    }
+    if split.len() < 2 {
+        return Err(format!(
+            "{} {label} split has fewer than two components",
+            entry.word_id
+        )
+        .into());
+    }
+
+    let parent_length = entry.surface.chars().count();
+    let mut consumed = 0_usize;
+    let mut previous = 0_usize;
+    let mut boundaries = Vec::with_capacity(split.len() - 1);
+    for (index, id) in split.iter().enumerate() {
+        let component = surfaces.get(*id as usize).ok_or_else(|| {
+            format!(
+                "{} {label} split references missing entry {id}",
+                entry.word_id
+            )
+        })?;
+        consumed += component.chars().count();
+        if index + 1 < split.len() {
+            if consumed <= previous || consumed >= parent_length {
+                return Err(format!(
+                    "{} {label} split reaches invalid boundary {consumed} for surface length {parent_length}",
+                    entry.word_id,
+                )
+                .into());
+            }
+            boundaries.push(u8::try_from(consumed).map_err(|_| {
+                format!(
+                    "{} {label} split boundary {consumed} exceeds u8",
+                    entry.word_id
+                )
+            })?);
+            previous = consumed;
+        }
+    }
+    if consumed != parent_length {
+        return Err(format!(
+            "{} {label} component lengths total {consumed}, expected {parent_length}",
+            entry.word_id,
+        )
+        .into());
+    }
+    Ok(boundaries)
+}
+
+fn write_record(
+    writer: &mut BinaryWriter,
+    entry: &SourceEntry,
+    surfaces: &[String],
+) -> Result<(), Box<dyn Error>> {
     writer.u32(entry.word_id);
     writer.i16(entry.cost);
     writer.string(&entry.surface)?;
@@ -194,9 +259,14 @@ fn write_record(writer: &mut BinaryWriter, entry: &SourceEntry) -> Result<(), Bo
     writer.string(&entry.normalized_form)?;
     writer.string(&entry.dictionary_form)?;
     writer.string(&entry.pos.join(" · "))?;
-    writer.ids(&entry.a_split)?;
-    writer.ids(&entry.b_split)?;
-    writer.ids(&entry.word_structure)?;
+    writer.boundaries(&split_boundaries(entry, &entry.a_split, surfaces, "A")?)?;
+    writer.boundaries(&split_boundaries(entry, &entry.b_split, surfaces, "B")?)?;
+    writer.boundaries(&split_boundaries(
+        entry,
+        &entry.word_structure,
+        surfaces,
+        "Structure",
+    )?)?;
     Ok(())
 }
 
@@ -297,19 +367,38 @@ fn sha256_file(path: &Path) -> Result<String, Box<dyn Error>> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+fn source_reader(path: &Path) -> Result<BufReader<GzDecoder<File>>, Box<dyn Error>> {
+    Ok(BufReader::new(GzDecoder::new(File::open(path)?)))
+}
+
+fn load_surfaces(input: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+    let mut surfaces = Vec::new();
+    for line in source_reader(input)?.lines() {
+        let entry: SurfaceEntry = serde_json::from_str(&line?)?;
+        if entry.word_id as usize != surfaces.len() {
+            return Err(format!(
+                "non-contiguous word ID {} while loading surface {}",
+                entry.word_id,
+                surfaces.len(),
+            )
+            .into());
+        }
+        surfaces.push(entry.surface);
+    }
+    Ok(surfaces)
+}
+
 fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     fs::create_dir_all(output)?;
-    let input_file = File::open(input)?;
-    let decoder = GzDecoder::new(input_file);
-    let reader = BufReader::new(decoder);
+    let surfaces = load_surfaces(input)?;
     let mut aliases = Vec::new();
     let mut entries = 0_u64;
     let mut record_files = Vec::new();
     let mut record_sizes = Vec::new();
     let mut record_entries = Vec::with_capacity(RECORD_SPAN as usize);
 
-    for line in reader.lines() {
+    for line in source_reader(input)?.lines() {
         let entry: SourceEntry = serde_json::from_str(&line?)?;
         if entry.word_id as u64 != entries {
             return Err(format!(
@@ -328,6 +417,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
                 &mut record_files,
                 &mut record_sizes,
                 &mut record_entries,
+                &surfaces,
             )?;
         }
     }
@@ -337,6 +427,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             &mut record_files,
             &mut record_sizes,
             &mut record_entries,
+            &surfaces,
         )?;
     }
 
@@ -380,6 +471,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         },
         search_size: stats(search_sizes),
         record_size: stats(record_sizes),
+        split_encoding: "u8-code-point-boundaries",
         source_sha256: sha256_file(input)?,
         elapsed_seconds: started.elapsed().as_secs_f64(),
     };
@@ -405,13 +497,14 @@ fn flush_records(
     files: &mut Vec<String>,
     sizes: &mut Vec<u64>,
     entries: &mut Vec<SourceEntry>,
+    surfaces: &[String],
 ) -> Result<(), Box<dyn Error>> {
     let index = files.len();
     let file = format!("records/{index:04}.bin");
     fs::create_dir_all(output.join("records"))?;
     let mut writer = BinaryWriter::new(b"SDRE", entries.len() as u32);
     for entry in entries.iter() {
-        write_record(&mut writer, entry)?;
+        write_record(&mut writer, entry, surfaces)?;
     }
     sizes.push(write_file(&output.join(&file), &writer.bytes)?);
     files.push(file);
@@ -452,5 +545,40 @@ mod tests {
     #[test]
     fn reading_aliases_include_hiragana() {
         assert_eq!(to_hiragana("センキョ"), "せんきょ");
+    }
+
+    fn entry(surface: &str, split: Vec<u32>) -> SourceEntry {
+        SourceEntry {
+            word_id: 2,
+            surface: surface.into(),
+            reading_form: String::new(),
+            normalized_form: String::new(),
+            dictionary_form: String::new(),
+            pos: Vec::new(),
+            cost: 0,
+            a_split: split,
+            b_split: Vec::new(),
+            word_structure: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn split_ids_become_code_point_boundaries() {
+        let surfaces = vec!["選挙".into(), "管理".into(), "委員会".into()];
+        let entry = entry("選挙管理委員会", vec![0, 1, 2]);
+        assert_eq!(
+            split_boundaries(&entry, &entry.a_split, &surfaces, "A").unwrap(),
+            vec![2, 4],
+        );
+    }
+
+    #[test]
+    fn capitalization_differences_preserve_parent_boundaries() {
+        let surfaces = vec!["AI".into(), "ロボティクス".into(), "Aiロボティクス".into()];
+        let entry = entry("Aiロボティクス", vec![0, 1]);
+        assert_eq!(
+            split_boundaries(&entry, &entry.a_split, &surfaces, "Structure").unwrap(),
+            vec![2],
+        );
     }
 }
