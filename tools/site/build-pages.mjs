@@ -61,11 +61,18 @@ async function copyDeploymentFiles(selectedDataset) {
   await stat(selectedDataset.source).catch(() => {
     throw new Error(`Selected dictionary artifact is missing: ${selectedDataset.source}`);
   });
-  await mkdir(resolve(outputDirectory, "data"), { recursive: true });
+  await Promise.all([
+    mkdir(resolve(outputDirectory, "data"), { recursive: true }),
+    mkdir(resolve(outputDirectory, "notices"), { recursive: true }),
+  ]);
   await Promise.all([
     cp(selectedDataset.source, selectedDataset.destination, { recursive: true }),
     cp(resolve(root, "public/_headers"), resolve(outputDirectory, "_headers")),
     cp(resolve(root, "pages/404.html"), resolve(outputDirectory, "404.html")),
+    cp(resolve(root, "pages/notices.html"), resolve(outputDirectory, "notices/index.html")),
+    cp(resolve(root, "legal/sudachidict"), resolve(outputDirectory, "notices/sudachidict"), {
+      recursive: true,
+    }),
   ]);
 }
 

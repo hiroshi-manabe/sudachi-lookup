@@ -295,6 +295,7 @@ export function LookupApp() {
             : dataset.startsWith("full-") ? "SudachiDict Full 20260428" : "SudachiDict Core 20260428"
         }</span>
         <span>Binary data decoded and searched inside a Web Worker</span>
+        <a className="footer-link" href="/notices/">Dictionary notices</a>
       </footer>
     </div>
   );

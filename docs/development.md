@@ -204,6 +204,16 @@ For subsequent sample previews, the repository packages that sequence as:
 npm run deploy:pages:staging
 ```
 
+Core uses a separate preview branch and an edition-specific command:
+
+```sh
+npm run deploy:pages:core-staging
+```
+
+That command validates the prepared Core artifact, assembles Core without
+sample or Full data, includes the pinned SudachiDict license and legal notice,
+and deploys to `core-staging.sudachi-lookup.pages.dev`.
+
 The preview should be accepted only after verifying:
 
 - The application loads and survives a direct-page reload.

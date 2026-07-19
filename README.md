@@ -92,8 +92,9 @@ are absent.
 
 The deterministic static Pages assembly target is implemented and accepts
 exactly one of `sample`, `core`, or `full`. The sample is deployed at
-<https://staging.sudachi-lookup.pages.dev>; Core and Full will follow as
-separate, explicitly selected releases.
+<https://staging.sudachi-lookup.pages.dev>, and Core is deployed separately at
+<https://core-staging.sudachi-lookup.pages.dev>. Full remains a later,
+explicitly selected release.
 
 The current Vinext build remains useful for local development, but its
 Worker-oriented output and locally copied generated datasets must not be
@@ -105,8 +106,13 @@ The repeatable sample preview command is `npm run deploy:pages:staging`. It
 always rebuilds the sample artifact before uploading, so ignored local Core or
 Full data cannot leak into an ordinary preview.
 
-After the sample preview proves the delivery path, validate the prepared Core
-build under production-like HTTP compression and measure:
+Core remains a separate artifact and deployment. Use
+`npm run deploy:pages:core-staging` to validate the pinned Core data, assemble a
+Core-only Pages directory with its legal notices, and deploy the `core-staging`
+preview branch.
+
+The Core preview now provides the production-like HTTP environment needed to
+measure:
 
 - Total compressed output size
 - Bootstrap-index size

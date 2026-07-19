@@ -433,6 +433,15 @@ button {
   line-height: 1.6;
 }
 
+.footer-link {
+  color: inherit;
+  text-underline-offset: 3px;
+}
+
+.footer-link:hover {
+  color: var(--leaf);
+}
+
 @media (max-width: 760px) {
   .shell {
     width: min(100% - 24px, 680px);
