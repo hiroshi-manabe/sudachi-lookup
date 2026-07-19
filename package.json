@@ -13,6 +13,7 @@
     "preview:pages": "vite preview --config vite.pages.config.ts",
     "deploy:pages:staging": "npm run build:pages -- --edition sample && node tools/site/deploy-pages.mjs --branch staging",
     "deploy:pages:core-staging": "npm run data:core:validate && npm run build:pages -- --edition core && node tools/site/deploy-pages.mjs --branch core-staging",
+    "deploy:pages:full-staging": "npm run data:full:validate && npm run build:pages -- --edition full && node tools/site/deploy-pages.mjs --branch full-staging",
     "data:sample": "node tools/dictionary/build-sample.mjs",
     "data:core": "SUDACHI_EDITION=core node tools/dictionary/export-dictionary.mjs",
     "data:core:web": "SUDACHI_EDITION=core node tools/dictionary/build-dictionary-web.mjs",
