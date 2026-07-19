@@ -283,10 +283,13 @@ Query normalization and monotonically increasing request ID
 Web Worker -> manifest route -> shard cache/fetch -> binary search -> ranking
     |
     v
-Top results returned to UI
+Stable top-result IDs returned to UI -> placeholder cards
     |
     v
-Selected result -> detail shard -> A/B/C expansion
+Cached records rendered immediately
+    |
+    v
+Record shards settle independently -> matching cards filled in place
 ```
 
 The runtime should:
@@ -296,7 +299,12 @@ The runtime should:
 - Abort fetches when practical, without relying on abort for correctness.
 - Keep decoded shards in a memory-bounded LRU cache.
 - Allow the browser HTTP cache to retain compressed responses.
-- Return a first result frame before optional details finish loading.
+- Show approximately 20 placeholder cards as soon as a non-empty query starts.
+- Finish search-shard ranking before exposing result IDs, so provisional entries
+  never appear in the wrong order.
+- Lock those IDs to stable slots, render bootstrap or cached records
+  immediately, and fill the remaining slots as each record shard settles.
+- Ignore every slot or record update whose request ID is stale.
 - Return approximately 20 results initially, then append continuation pages as
   the user approaches the end of the list.
 - Preserve already displayed entries and stable deduplication when a broad

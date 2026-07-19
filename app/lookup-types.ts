@@ -20,11 +20,18 @@ export type LookupResult = {
 export type WorkerResponse =
   | { type: "ready"; entries: number; aliases: number; dataset: string }
   | {
-      type: "results";
+      type: "result-slots";
+      requestId: number;
+      query: string;
+      ids: number[];
+      append: boolean;
+      hasMore: boolean;
+    }
+  | {
+      type: "result-batch";
       requestId: number;
       query: string;
       results: LookupResult[];
-      append: boolean;
-      hasMore: boolean;
+      complete: boolean;
     }
   | { type: "error"; message: string; requestId?: number };

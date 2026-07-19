@@ -19,9 +19,12 @@ under a 4 MiB decoded budget. The bootstrap is stored as gzip, keeping the Core
 transfer below 0.75 MiB. It
 inherits v4's eager one-byte boundaries for Structure and A/B segmentation.
 The interface supports navigable compound components, mode badges, and
-mode-specific expansion without loading component records. The browser prefers
-generated Full or Core assets when present and otherwise falls back to the
-deterministic fixture.
+mode-specific expansion without loading component records. For queries outside
+the bootstrap, it reserves the first result slots immediately, locks their
+ranking after search shards arrive, and fills cards in place as cached or
+newly fetched record shards become available. The browser prefers generated
+Full or Core assets when present and otherwise falls back to the deterministic
+fixture.
 
 The proposed first release will provide:
 

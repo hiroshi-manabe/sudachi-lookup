@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
 
 const INITIAL_QUERY = "";
-type SearchState = "loading" | "idle" | "searching" | "settled" | "error";
+const INITIAL_RESULT_SLOTS = 20;
+type SearchState = "loading" | "idle" | "searching" | "hydrating" | "settled" | "error";
+type ResultSlot = { id: number | null; result: LookupResult | null };
 
 export function LookupApp() {
   const workerRef = useRef<Worker | null>(null);
@@ -15,7 +17,7 @@ export function LookupApp() {
   const composingRef = useRef(false);
   const queryRef = useRef(INITIAL_QUERY);
   const [query, setQuery] = useState(INITIAL_QUERY);
-  const [results, setResults] = useState<LookupResult[]>([]);
+  const [resultSlots, setResultSlots] = useState<ResultSlot[]>([]);
   const [status, setStatus] = useState("Loading local dictionary…");
   const [dataset, setDataset] = useState("sample");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -41,20 +43,26 @@ export function LookupApp() {
         setDataset(message.dataset);
         setStatus(`${message.entries} entries · ${message.aliases} searchable forms`);
         search(queryRef.current, worker);
-      } else if (message.type === "results") {
+      } else if (message.type === "result-slots") {
         if (message.requestId !== requestIdRef.current) return;
-        setResults((current) => message.append
-          ? appendUniqueResults(current, message.results)
-          : message.results,
+        setResultSlots((current) => message.append
+          ? appendUniqueSlots(current, message.ids)
+          : message.ids.map((id) => ({ id, result: null })),
         );
         setHasMore(message.hasMore);
-        loadingMoreRequestRef.current = false;
-        setLoadingMore(false);
-        setAutomaticLoadBlocked(false);
-        setSearchState("settled");
         if (!message.append) {
           setActiveIndex(0);
           setExpandedId(null);
+          setSearchState(message.ids.length ? "hydrating" : "settled");
+        }
+      } else if (message.type === "result-batch") {
+        if (message.requestId !== requestIdRef.current) return;
+        setResultSlots((current) => fillResultSlots(current, message.results));
+        if (message.complete) {
+          loadingMoreRequestRef.current = false;
+          setLoadingMore(false);
+          setAutomaticLoadBlocked(false);
+          setSearchState("settled");
         }
       } else {
         if (message.requestId && message.requestId !== requestIdRef.current) return;
@@ -92,7 +100,7 @@ export function LookupApp() {
     );
     observer.observe(target);
     return () => observer.disconnect();
-  }, [automaticLoadBlocked, hasMore, loadingMore, results.length]);
+  }, [automaticLoadBlocked, hasMore, loadingMore, resultSlots.length]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -110,7 +118,7 @@ export function LookupApp() {
     if (!worker) return;
     const requestId = ++requestIdRef.current;
     loadingMoreRequestRef.current = false;
-    setResults([]);
+    setResultSlots([]);
     setActiveIndex(0);
     setExpandedId(null);
     setHasMore(false);
@@ -120,6 +128,7 @@ export function LookupApp() {
       setSearchState("idle");
       return;
     }
+    setResultSlots(createPendingSlots(INITIAL_RESULT_SLOTS));
     setSearchState("searching");
     worker.postMessage({ type: "search", requestId, query: nextQuery });
   }
@@ -162,15 +171,17 @@ export function LookupApp() {
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      setActiveIndex((index) => Math.min(index + 1, results.length - 1));
+      setActiveIndex((index) => findLoadedSlot(resultSlots, index, 1));
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      setActiveIndex((index) => Math.max(index - 1, 0));
-    } else if (event.key === "Enter" && results[activeIndex]?.splits) {
+      setActiveIndex((index) => findLoadedSlot(resultSlots, index, -1));
+    } else if (event.key === "Enter" && resultSlots[activeIndex]?.result?.splits) {
       event.preventDefault();
-      toggleResult(results[activeIndex]);
+      toggleResult(resultSlots[activeIndex].result);
     }
   }
+
+  const loadedCount = resultSlots.reduce((count, slot) => count + Number(Boolean(slot.result)), 0);
 
   return (
     <div className="shell">
@@ -217,7 +228,7 @@ export function LookupApp() {
       <section
         aria-labelledby="results-heading"
         aria-live="polite"
-        aria-busy={searchState === "loading" || searchState === "searching"}
+        aria-busy={searchState === "loading" || searchState === "searching" || searchState === "hydrating"}
       >
         <div className="results-header">
           <h2 className="results-title" id="results-heading">Matches</h2>
@@ -228,14 +239,18 @@ export function LookupApp() {
                 ? "0 results"
               : searchState === "searching"
                 ? "Searching…"
+                : searchState === "hydrating"
+                  ? `${loadedCount} of ${resultSlots.length} loaded`
                 : searchState === "error"
                   ? "Unavailable"
-                  : `${results.length}${hasMore ? "+" : ""} ${results.length === 1 ? "result" : "results"}`
+                  : `${loadedCount}${hasMore ? "+" : ""} ${loadedCount === 1 ? "result" : "results"}`
           }</span>
         </div>
 
         <div className="results" id="lookup-results" role="list">
-          {results.map((result, index) => {
+          {resultSlots.map((slot, index) => {
+            const result = slot.result;
+            if (!result) return <ResultSkeleton key={slot.id ?? `pending-${index}`} />;
             const expanded = expandedId === result.id;
             const panelId = `split-${result.id}`;
             return (
@@ -291,7 +306,7 @@ export function LookupApp() {
               </article>
             );
           })}
-          {!results.length ? (
+          {!resultSlots.length ? (
             <div className="empty">{
               searchState === "loading"
                 ? "Loading dictionary…"
@@ -305,7 +320,7 @@ export function LookupApp() {
             }</div>
           ) : null}
         </div>
-        {results.length ? (
+        {resultSlots.length ? (
           <div className="result-continuation">
             {hasMore ? (
               <button
@@ -337,9 +352,50 @@ export function LookupApp() {
   );
 }
 
-function appendUniqueResults(current: LookupResult[], additional: LookupResult[]) {
-  const ids = new Set(current.map((result) => result.id));
-  return [...current, ...additional.filter((result) => !ids.has(result.id))];
+function createPendingSlots(count: number): ResultSlot[] {
+  return Array.from({ length: count }, () => ({ id: null, result: null }));
+}
+
+function appendUniqueSlots(current: ResultSlot[], ids: number[]) {
+  const currentIds = new Set(current.flatMap((slot) => slot.id === null ? [] : [slot.id]));
+  return [
+    ...current,
+    ...ids.filter((id) => !currentIds.has(id)).map((id) => ({ id, result: null })),
+  ];
+}
+
+function fillResultSlots(current: ResultSlot[], results: LookupResult[]) {
+  if (!results.length) return current;
+  const byId = new Map(results.map((result) => [result.id, result]));
+  return current.map((slot) => slot.id !== null && byId.has(slot.id)
+    ? { ...slot, result: byId.get(slot.id)! }
+    : slot,
+  );
+}
+
+function findLoadedSlot(slots: ResultSlot[], current: number, direction: 1 | -1) {
+  for (let index = current + direction; index >= 0 && index < slots.length; index += direction) {
+    if (slots[index].result) return index;
+  }
+  return current;
+}
+
+function ResultSkeleton() {
+  return (
+    <article className="result-card result-skeleton" role="listitem" aria-hidden="true">
+      <div className="result-main">
+        <div className="skeleton-group">
+          <span className="skeleton-line skeleton-heading" />
+          <span className="skeleton-line skeleton-reading" />
+        </div>
+        <div className="skeleton-group">
+          <span className="skeleton-line skeleton-detail" />
+          <span className="skeleton-line skeleton-detail skeleton-detail-short" />
+        </div>
+        <span className="skeleton-line skeleton-action" />
+      </div>
+    </article>
+  );
 }
 
 function SplitPanel({

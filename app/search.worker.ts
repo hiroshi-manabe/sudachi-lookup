@@ -107,13 +107,14 @@ self.onmessage = async (event: MessageEvent) => {
       if (message.requestId !== activeRequestId) return;
       activeSession = page.session;
       self.postMessage({
-        type: "results",
+        type: "result-slots",
         requestId: message.requestId,
         query: message.query,
-        results: page.results,
+        ids: page.ids,
         append: false,
         hasMore: page.hasMore,
       });
+      await streamResults(page.ids, message.requestId, message.query);
     }
     if (message.type === "more") {
       const session = activeSession;
@@ -121,13 +122,14 @@ self.onmessage = async (event: MessageEvent) => {
       const page = await continueSearch(session);
       if (message.requestId !== activeRequestId) return;
       self.postMessage({
-        type: "results",
+        type: "result-slots",
         requestId: message.requestId,
         query: message.query,
-        results: page.results,
+        ids: page.ids,
         append: true,
         hasMore: page.hasMore,
       });
+      await streamResults(page.ids, message.requestId, message.query);
     }
   } catch (error) {
     if (message.requestId && message.requestId !== activeRequestId) return;
@@ -196,7 +198,7 @@ async function startSearch(requestId: number, rawQuery: string) {
     const session: SearchSession = {
       requestId, query: rawQuery, sentIds: new Set(), remainingIds: [], deferredFullSearch: false,
     };
-    return { results: [], hasMore: false, session };
+    return { ids: [], hasMore: false, session };
   }
 
   let rankedIds: number[];
@@ -222,9 +224,8 @@ async function startSearch(requestId: number, rawQuery: string) {
     remainingIds: rankedIds.slice(INITIAL_RESULTS),
     deferredFullSearch,
   };
-  const results = await hydrateResults(selectedIds);
   return {
-    results,
+    ids: selectedIds,
     hasMore: session.remainingIds.length > 0 || session.deferredFullSearch,
     session,
   };
@@ -241,8 +242,7 @@ async function continueSearch(session: SearchSession) {
 
   const selectedIds = session.remainingIds.splice(0, PAGE_RESULTS);
   for (const id of selectedIds) session.sentIds.add(id);
-  const results = await hydrateResults(selectedIds);
-  return { results, hasMore: session.remainingIds.length > 0 };
+  return { ids: selectedIds, hasMore: session.remainingIds.length > 0 };
 }
 
 function createSearchPlan(rawQuery: string): SearchPlan {
@@ -297,12 +297,39 @@ function rankSampleCandidates(variants: string[]) {
     .map(({ entry }) => entry.id);
 }
 
-async function hydrateResults(selectedIds: number[]) {
-  if (mode === "sample") {
-    return selectedIds.map((id) => entries.get(id)).filter(Boolean).map((entry) => toResult(entry!));
+async function streamResults(selectedIds: number[], requestId: number, query: string) {
+  const readyIds = selectedIds.filter((id) => entries.has(id));
+  const missingIds = selectedIds.filter((id) => !entries.has(id));
+
+  postResultBatch(readyIds, requestId, query, missingIds.length === 0);
+  if (missingIds.length === 0 || mode === "sample") return;
+
+  const manifest = dictionaryManifest!;
+  const idsByShard = new Map<number, number[]>();
+  for (const id of missingIds) {
+    const shardIndex = Math.floor(id / manifest.records.span);
+    const ids = idsByShard.get(shardIndex) ?? [];
+    ids.push(id);
+    idsByShard.set(shardIndex, ids);
   }
-  await loadRecordIds(selectedIds.filter((id) => !entries.has(id)));
-  return selectedIds.map((id) => toResult(entries.get(id)!)).filter(Boolean);
+
+  await Promise.all([...idsByShard].map(async ([shardIndex, ids]) => {
+    await loadRecordShard(shardIndex);
+    if (requestId !== activeRequestId) return;
+    postResultBatch(ids, requestId, query, false);
+  }));
+
+  if (requestId === activeRequestId) postResultBatch([], requestId, query, true);
+}
+
+function postResultBatch(ids: number[], requestId: number, query: string, complete: boolean) {
+  self.postMessage({
+    type: "result-batch",
+    requestId,
+    query,
+    results: ids.map((id) => entries.get(id)).filter(Boolean).map((entry) => toResult(entry!)),
+    complete,
+  });
 }
 
 function routeShards(shards: SearchShard[], query: string) {
@@ -324,24 +351,21 @@ async function loadSearchShard(file: string) {
   return promise;
 }
 
-async function loadRecordIds(ids: number[]) {
+function loadRecordShard(index: number) {
   const manifest = dictionaryManifest!;
-  const shardIndexes = new Set(ids.map((id) => Math.floor(id / manifest.records.span)));
-  await Promise.all([...shardIndexes].map((index) => {
-    let promise = recordCache.get(index);
-    if (!promise) {
-      const file = manifest.records.files[index];
-      if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
-      promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
-        if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 7)) {
-          entries.set(id, entry);
-        }
-      });
-      recordCache.set(index, promise);
-    }
-    return promise;
-  }));
+  let promise = recordCache.get(index);
+  if (!promise) {
+    const file = manifest.records.files[index];
+    if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
+    promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
+      if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
+      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 7)) {
+        entries.set(id, entry);
+      }
+    });
+    recordCache.set(index, promise);
+  }
+  return promise;
 }
 
 function collectCandidates(aliasSets: Alias[][], variants: string[]) {
