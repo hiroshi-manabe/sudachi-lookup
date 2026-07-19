@@ -134,7 +134,7 @@ function ensureLoaded() {
 async function loadData() {
   for (const base of DICTIONARY_BASES) {
     const response = await fetch(`${base}/manifest.json`);
-    if (!response.ok) continue;
+    if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (dictionaryManifest.formatVersion !== 3) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
@@ -149,6 +149,9 @@ async function loadData() {
 
   const manifestResponse = await fetch("/data/sample/manifest.json");
   if (!manifestResponse.ok) throw new Error("Dictionary manifest could not be loaded");
+  if (!isJsonResponse(manifestResponse)) {
+    throw new Error("Dictionary manifest returned non-JSON content");
+  }
   const manifest = await manifestResponse.json();
   const [entriesResponse, indexResponse] = await Promise.all([
     fetch(`/data/sample/${manifest.entriesFile}`),
@@ -157,6 +160,10 @@ async function loadData() {
   if (!entriesResponse.ok || !indexResponse.ok) throw new Error("Sample dictionary could not be loaded");
   entries = decodeEntries(await entriesResponse.arrayBuffer(), 1);
   sampleAliases = decodeAliases(await indexResponse.arrayBuffer(), 1);
+}
+
+function isJsonResponse(response: Response) {
+  return response.headers.get("content-type")?.toLowerCase().includes("application/json") ?? false;
 }
 
 async function startSearch(requestId: number, rawQuery: string) {

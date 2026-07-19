@@ -65,7 +65,7 @@ async function copyDeploymentFiles(selectedDataset) {
   await Promise.all([
     cp(selectedDataset.source, selectedDataset.destination, { recursive: true }),
     cp(resolve(root, "public/_headers"), resolve(outputDirectory, "_headers")),
-    cp(resolve(root, "public/_redirects"), resolve(outputDirectory, "_redirects")),
+    cp(resolve(root, "pages/404.html"), resolve(outputDirectory, "404.html")),
   ]);
 }
 
