@@ -89,8 +89,18 @@ are absent.
 
 ## Next milestone
 
-Validate the prepared Core build under production-like HTTP compression and
-measure:
+Add a deterministic static Pages assembly target that accepts exactly one of
+`sample`, `core`, or `full`. The first hosted deployment will use the sample
+fixture on a Wrangler-created `pages.dev` preview; Core and Full will follow as
+separate, explicitly selected releases.
+
+The current Vinext build remains useful for local development, but its
+Worker-oriented output and locally copied generated datasets must not be
+uploaded to Pages unchanged. The deployment runbook and acceptance checks are
+in [docs/development.md](docs/development.md).
+
+After the sample preview proves the delivery path, validate the prepared Core
+build under production-like HTTP compression and measure:
 
 - Total compressed output size
 - Bootstrap-index size

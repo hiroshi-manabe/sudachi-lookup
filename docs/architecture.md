@@ -406,9 +406,15 @@ real results, and expand at least one A/B/C entry. Creating Pages at that point
 tests real compression, caching, MIME types, file limits, and network latency
 without making hosting setup block the data prototype.
 
-Use `pages.dev` deployment and branch-preview URLs during development. Connect
-the production custom domain only after the complete release candidate passes
-data integrity, licensing, caching, accessibility, and mobile-performance
+Use `pages.dev` deployment and Wrangler-created branch-preview URLs during
+development. The selected production setup is a Pages Direct Upload project so
+CI can assemble and validate exactly one dictionary edition before upload.
+Direct Upload does not provide native Git-triggered previews and cannot later be
+converted to Git integration; explicit preview deployments are acceptable for
+this personal project and keep the Full release pipeline deterministic.
+
+Connect the production custom domain only after the complete release candidate
+passes data integrity, licensing, caching, accessibility, and mobile-performance
 checks. An optional staging subdomain may point at a stable preview branch.
 
 ### 11.3 Production delivery
@@ -416,14 +422,22 @@ checks. An optional staging subdomain may point at a stable preview branch.
 The production site consists only of static application files and dictionary
 assets. Pages Functions, D1, KV, and R2 are unnecessary for the initial design.
 
+The current Vinext build is an intermediate application build rather than the
+final Pages artifact: it emits a Worker entry point and browser assets without a
+standalone static HTML entry point. A Pages-specific assembly target must create
+a clean static directory and require an explicit `sample`, `core`, or `full`
+selection. It must never infer the deployed edition from whichever ignored data
+happens to exist in the working tree.
+
 For the Full edition, CI owns the production build. It retrieves the validated
 dictionary artifact, builds the frontend, assembles and tests the complete
-`dist/` directory, and uploads it to Pages with Wrangler. Pages is the static
-host rather than the place where the expensive dictionary build occurs.
+`dist/pages/` directory, and uploads it to Pages with Wrangler. Pages is the
+static host rather than the place where the expensive dictionary build occurs.
 
-Core prototypes may initially use a Pages-native Git build that downloads a
-prepared dictionary artifact if measurements show that this remains quick and
-reliable. The Full workflow should not depend on that convenience path.
+The first upload uses the sample fixture on a preview branch. Core follows on a
+separate staging branch after cache and content-type behavior is proven. Full is
+attached only to an explicit CI release job after Core establishes network and
+browser-performance budgets.
 
 Versioned and content-hashed data files can use:
 

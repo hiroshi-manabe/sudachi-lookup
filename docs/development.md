@@ -96,9 +96,10 @@ responses cannot overwrite a newer query.
 
 ## When to create Cloudflare Pages
 
-Create the Pages project after the vertical slice is complete. At that point,
-the project has something meaningful to validate under production-like hosting
-conditions but has not yet invested heavily in interface polish.
+Create the Pages project after the vertical slice is complete. That milestone
+has now been reached: the browser can search generated dictionary data and
+navigate Structure and A/B/C relationships. The next development milestone is
+therefore a hosted preview rather than additional local-only infrastructure.
 
 Use Pages to test:
 
@@ -110,9 +111,135 @@ Use Pages to test:
 - Mobile-network behavior
 - Total file count and maximum asset size
 
-During development, use the project’s `pages.dev` address and automatic branch
-or pull-request previews. Preview deployments should use the sample fixture by
+During development, use the project’s `pages.dev` address and branch preview
+URLs created by Wrangler. Preview deployments should use the sample fixture by
 default so a CSS or interaction change does not trigger or transfer Full.
+
+## Deployment readiness gap
+
+The application behavior is ready for a hosted preview, but the current build
+output is not yet a directory that should be uploaded to Pages unchanged.
+
+`npm run build` currently emits a Vinext Worker-oriented package:
+
+```text
+dist/client/          Browser assets, but no standalone index.html
+dist/server/index.js  Worker entry point
+```
+
+In addition, a build made in a working tree containing generated Core and Full
+assets may copy both editions into `dist/`. That makes the output dependent on
+local state and could accidentally upload several gigabytes when only the
+sample fixture was intended.
+
+Before creating the Pages project, add a deterministic Pages assembly command
+with an explicit edition, conceptually:
+
+```text
+npm run build:pages -- --edition sample
+npm run build:pages -- --edition core
+npm run build:pages -- --edition full
+```
+
+Each command must create a clean output directory such as `dist/pages/` with a
+standalone HTML entry point, application assets, `_headers`, and exactly one
+selected dataset. Because all search behavior runs in the browser, the Pages
+target should be a static Vite/React application rather than requiring the
+Vinext server entry point.
+
+The assembly step must fail if:
+
+- More than one dictionary edition is present in the output.
+- A manifest references a missing file.
+- A generated file exceeds the configured per-file budget.
+- The total file count exceeds the configured Pages budget.
+- The requested Core or Full artifact is unavailable or has the wrong checksum.
+
+Serve this exact directory locally before upload. Testing only through the
+development server is insufficient because it does not prove the production
+entry point, copied assets, or `_headers` placement.
+
+## Recommended first deployment
+
+Use a Cloudflare Pages **Direct Upload** project deployed with Wrangler. This
+matches the selected Full workflow: the local machine or CI assembles and
+validates the complete output, while Pages only receives finished static files.
+
+Direct Upload projects cannot later be converted to Pages Git integration. That
+tradeoff is acceptable here because branch previews can still be deployed
+explicitly with Wrangler and the large dictionary build should remain under CI
+control. If native pull-request previews later become more valuable than the
+controlled assembly pipeline, create a separate Git-integrated sample project
+rather than changing the production project.
+
+After the deterministic static output exists, create the project interactively:
+
+```sh
+npx wrangler login
+npx wrangler pages project create
+```
+
+Use `sudachi-lookup` as the preferred project name and `main` as the production
+branch. Then make the first upload a non-production sample preview:
+
+```sh
+npm run build:pages -- --edition sample
+npx wrangler pages deploy dist/pages \
+  --project-name=sudachi-lookup \
+  --branch=staging
+```
+
+The preview should be accepted only after verifying:
+
+- The application loads and survives a direct-page reload.
+- `今日` and representative surface, reading, and normalized-form searches work.
+- Structure components and expanded A/B/C units remain navigable.
+- Japanese IME composition does not issue disruptive searches.
+- Stale Web Worker responses cannot replace a newer query.
+- Missing shards fail visibly without breaking subsequent searches.
+- Dictionary files have the expected content types and compression.
+- HTML and manifests revalidate while versioned shards remain immutable.
+
+Cloudflare documents the current Direct Upload commands and preview-branch URL
+behavior in [Direct Upload](https://developers.cloudflare.com/pages/get-started/direct-upload/).
+
+## Staged dictionary rollout
+
+Do not make Full the first real-data deployment. Use the following progression:
+
+1. **Sample preview:** prove routing, static output, MIME types, caching, and the
+   Pages project configuration.
+2. **Core preview:** deploy to a separate branch such as `core-staging` and
+   measure real transfer, search latency, request count, and browser memory.
+3. **Automated Core release:** add the CI-owned assembly and retain the exact
+   dictionary artifact and output metadata used for deployment.
+4. **Full preview:** deploy Full only through an explicit release or manual CI
+   job and repeat the Core measurements on mobile and cold caches.
+5. **Production release:** promote a previously validated artifact rather than
+   regenerating data during the production deployment.
+
+Normal frontend checks and previews continue to use the sample fixture. Core
+and Full are selected explicitly; the application's local Full-to-Core-to-sample
+fallback must not be used as deployment selection logic.
+
+## Static cache policy
+
+The current `_headers` file covers only the sample fixture. Before Core is
+uploaded, extend it to cover versioned Core and Full paths.
+
+Content-addressed or release-versioned shards can use:
+
+```text
+Cache-Control: public, max-age=31556952, immutable
+```
+
+The HTML entry point and the small manifest that selects the active release
+must remain revalidatable. This allows a release to switch atomically to a new
+versioned directory without mixing old manifests with missing new shards.
+Cloudflare describes static asset rules in
+[Headers](https://developers.cloudflare.com/pages/configuration/headers/) and
+its default compression and cache behavior in
+[Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/).
 
 ## When to connect the custom domain
 
@@ -129,6 +256,13 @@ release candidate satisfies all of the following:
 
 If a stable public test address is useful, attach a staging subdomain to a
 preview branch before connecting the production subdomain.
+
+Add the hostname through **Workers & Pages → the Pages project → Custom
+domains** before creating or changing DNS manually. Prefer a subdomain for the
+first public release. When the DNS zone is already managed by Cloudflare, Pages
+can create the required record; otherwise point a CNAME at the assigned
+`pages.dev` hostname after associating the hostname with the Pages project. See
+[Custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/).
 
 ## Deployment alternatives
 
@@ -212,6 +346,14 @@ build frontend
 
 Normal frontend pull requests should build against the sample fixture. Full
 should be attached only to explicit staging and production jobs.
+
+For deployment, store `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` as CI secrets. Scope the token to **Account → Cloudflare
+Pages → Edit** and to the intended account. The site workflow should run tests
+before assembly, record the chosen edition and artifact checksum, and pass only
+the clean `dist/pages/` directory to Wrangler. Cloudflare's current setup is
+documented in
+[Use Direct Upload with continuous integration](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
 
 ## Edition policy
 
