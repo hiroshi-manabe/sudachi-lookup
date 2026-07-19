@@ -115,10 +115,10 @@ During development, use the project’s `pages.dev` address and branch preview
 URLs created by Wrangler. Preview deployments should use the sample fixture by
 default so a CSS or interaction change does not trigger or transfer Full.
 
-## Deployment readiness gap
+## Pages deployment output
 
-The application behavior is ready for a hosted preview, but the current build
-output is not yet a directory that should be uploaded to Pages unchanged.
+The application behavior and a dedicated static output are ready for a hosted
+preview. The ordinary application build is still not the Pages artifact.
 
 `npm run build` currently emits a Vinext Worker-oriented package:
 
@@ -132,8 +132,7 @@ assets may copy both editions into `dist/`. That makes the output dependent on
 local state and could accidentally upload several gigabytes when only the
 sample fixture was intended.
 
-Before creating the Pages project, add a deterministic Pages assembly command
-with an explicit edition, conceptually:
+The implemented Pages assembly command requires an explicit edition:
 
 ```text
 npm run build:pages -- --edition sample
@@ -141,13 +140,13 @@ npm run build:pages -- --edition core
 npm run build:pages -- --edition full
 ```
 
-Each command must create a clean output directory such as `dist/pages/` with a
+Each command creates a clean `dist/pages/` directory with a
 standalone HTML entry point, application assets, `_headers`, and exactly one
 selected dataset. Because all search behavior runs in the browser, the Pages
 target should be a static Vite/React application rather than requiring the
 Vinext server entry point.
 
-The assembly step must fail if:
+The assembly step fails if:
 
 - More than one dictionary edition is present in the output.
 - A manifest references a missing file.
@@ -155,9 +154,15 @@ The assembly step must fail if:
 - The total file count exceeds the configured Pages budget.
 - The requested Core or Full artifact is unavailable or has the wrong checksum.
 
-Serve this exact directory locally before upload. Testing only through the
-development server is insufficient because it does not prove the production
-entry point, copied assets, or `_headers` placement.
+Serve this exact directory locally before upload:
+
+```sh
+npm run build:pages -- --edition sample
+npm run preview:pages
+```
+
+Testing only through the development server is insufficient because it does not
+prove the production entry point, copied assets, or `_headers` placement.
 
 ## Recommended first deployment
 
@@ -224,8 +229,9 @@ fallback must not be used as deployment selection logic.
 
 ## Static cache policy
 
-The current `_headers` file covers only the sample fixture. Before Core is
-uploaded, extend it to cover versioned Core and Full paths.
+The current `_headers` file keeps the sample fixture revalidatable and applies
+immutable caching to fingerprinted application assets and versioned Core or
+Full paths.
 
 Content-addressed or release-versioned shards can use:
 

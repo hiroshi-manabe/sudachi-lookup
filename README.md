@@ -90,15 +90,16 @@ are absent.
 
 ## Next milestone
 
-Add a deterministic static Pages assembly target that accepts exactly one of
-`sample`, `core`, or `full`. The first hosted deployment will use the sample
-fixture on a Wrangler-created `pages.dev` preview; Core and Full will follow as
-separate, explicitly selected releases.
+The deterministic static Pages assembly target is implemented and accepts
+exactly one of `sample`, `core`, or `full`. The next step is the first hosted
+sample deployment on a Wrangler-created `pages.dev` preview; Core and Full will
+follow as separate, explicitly selected releases.
 
 The current Vinext build remains useful for local development, but its
 Worker-oriented output and locally copied generated datasets must not be
-uploaded to Pages unchanged. The deployment runbook and acceptance checks are
-in [docs/development.md](docs/development.md).
+uploaded to Pages unchanged. Use `npm run build:pages -- --edition sample` and
+serve the result with `npm run preview:pages`. The deployment runbook and
+acceptance checks are in [docs/development.md](docs/development.md).
 
 After the sample preview proves the delivery path, validate the prepared Core
 build under production-like HTTP compression and measure:
