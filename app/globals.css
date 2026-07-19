@@ -382,6 +382,45 @@ button {
   text-align: center;
 }
 
+.result-continuation {
+  display: flex;
+  justify-content: center;
+  min-height: 78px;
+  padding: 20px 0 0;
+}
+
+.load-more {
+  align-self: flex-start;
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+  color: var(--leaf);
+  background: var(--paper-strong);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.load-more:hover:not(:disabled) {
+  border-color: rgba(35, 91, 71, 0.55);
+}
+
+.load-more:focus-visible {
+  outline: 3px solid rgba(217, 242, 79, 0.8);
+  outline-offset: 3px;
+}
+
+.load-more:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.result-end {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
 .footer {
   display: flex;
   justify-content: space-between;

@@ -19,5 +19,12 @@ export type LookupResult = {
 
 export type WorkerResponse =
   | { type: "ready"; entries: number; aliases: number; dataset: string }
-  | { type: "results"; requestId: number; query: string; results: LookupResult[] }
-  | { type: "error"; message: string };
+  | {
+      type: "results";
+      requestId: number;
+      query: string;
+      results: LookupResult[];
+      append: boolean;
+      hasMore: boolean;
+    }
+  | { type: "error"; message: string; requestId?: number };

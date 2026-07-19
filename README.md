@@ -21,6 +21,7 @@ The proposed first release will provide:
 - Prefix search over surface, dictionary, normalized, and reading forms
 - Hiragana and katakana query matching
 - Responsive, incremental results driven by a Web Worker
+- Progressive result loading for broad prefixes
 - Navigable Structure components and expandable A/B/C segmentation
 - A versioned, reproducible SudachiDict Core data build
 - A fully static Cloudflare Pages deployment

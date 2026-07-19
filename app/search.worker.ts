@@ -42,8 +42,24 @@ const DICTIONARY_BASES = [
   "/data/releases/core-20260428-v3",
 ];
 const MAX_FULL_ALIASES_FOR_SHORT_QUERY = 10_000;
-const MAX_RESULTS = 20;
+const INITIAL_RESULTS = 20;
+const PAGE_RESULTS = 50;
 const MAX_CODE_POINT = String.fromCodePoint(0x10ffff);
+
+type SearchPlan = {
+  variants: string[];
+  initialShardFiles: string[];
+  allShardFiles: string[];
+  deferredFullSearch: boolean;
+};
+
+type SearchSession = {
+  requestId: number;
+  query: string;
+  sentIds: Set<number>;
+  remainingIds: number[];
+  deferredFullSearch: boolean;
+};
 
 let mode: "sample" | "sharded" = "sample";
 let dictionaryBase = "";
@@ -54,10 +70,12 @@ let entries = new Map<number, Entry>();
 let searchCache = new Map<string, Promise<Alias[]>>();
 let recordCache = new Map<number, Promise<void>>();
 let loading: Promise<void> | null = null;
+let activeRequestId = 0;
+let activeSession: SearchSession | null = null;
 
 self.onmessage = async (event: MessageEvent) => {
+  const message = event.data;
   try {
-    const message = event.data;
     if (message.type === "init") {
       await ensureLoaded();
       self.postMessage({
@@ -68,21 +86,42 @@ self.onmessage = async (event: MessageEvent) => {
       });
     }
     if (message.type === "search") {
+      activeRequestId = message.requestId;
+      activeSession = null;
       await ensureLoaded();
-      const results = mode === "sharded"
-        ? await searchSharded(message.query)
-        : searchSample(message.query);
+      if (message.requestId !== activeRequestId) return;
+      const page = await startSearch(message.requestId, message.query);
+      if (message.requestId !== activeRequestId) return;
+      activeSession = page.session;
       self.postMessage({
         type: "results",
         requestId: message.requestId,
         query: message.query,
-        results,
+        results: page.results,
+        append: false,
+        hasMore: page.hasMore,
+      });
+    }
+    if (message.type === "more") {
+      const session = activeSession;
+      if (!session || message.requestId !== activeRequestId || session.query !== message.query) return;
+      const page = await continueSearch(session);
+      if (message.requestId !== activeRequestId) return;
+      self.postMessage({
+        type: "results",
+        requestId: message.requestId,
+        query: message.query,
+        results: page.results,
+        append: true,
+        hasMore: page.hasMore,
       });
     }
   } catch (error) {
+    if (message.requestId && message.requestId !== activeRequestId) return;
     self.postMessage({
       type: "error",
       message: error instanceof Error ? error.message : "Dictionary loading failed",
+      requestId: message.requestId,
     });
   }
 };
@@ -120,37 +159,115 @@ async function loadData() {
   sampleAliases = decodeAliases(await indexResponse.arrayBuffer(), 1);
 }
 
-async function searchSharded(rawQuery: string): Promise<LookupResult[]> {
+async function startSearch(requestId: number, rawQuery: string) {
+  const query = normalize(rawQuery);
+  if (!query) {
+    const session: SearchSession = {
+      requestId, query: rawQuery, sentIds: new Set(), remainingIds: [], deferredFullSearch: false,
+    };
+    return { results: [], hasMore: false, session };
+  }
+
+  let rankedIds: number[];
+  let deferredFullSearch = false;
+  if (mode === "sharded") {
+    const plan = createSearchPlan(rawQuery);
+    const loaded = await Promise.all(plan.initialShardFiles.map(loadSearchShard));
+    const aliasSets = plan.deferredFullSearch ? [bootstrapAliases, ...loaded] : loaded;
+    rankedIds = rankCandidates(aliasSets, plan.variants);
+    deferredFullSearch = plan.deferredFullSearch;
+  } else {
+    rankedIds = rankSampleCandidates(queryVariants(rawQuery));
+  }
+
+  const selectedIds = rankedIds.slice(0, INITIAL_RESULTS);
+  const session: SearchSession = {
+    requestId,
+    query: rawQuery,
+    sentIds: new Set(selectedIds),
+    remainingIds: rankedIds.slice(INITIAL_RESULTS),
+    deferredFullSearch,
+  };
+  const results = await hydrateResults(selectedIds);
+  return {
+    results,
+    hasMore: session.remainingIds.length > 0 || session.deferredFullSearch,
+    session,
+  };
+}
+
+async function continueSearch(session: SearchSession) {
+  if (session.deferredFullSearch) {
+    const plan = createSearchPlan(session.query);
+    const loaded = await Promise.all(plan.allShardFiles.map(loadSearchShard));
+    session.remainingIds = rankCandidates(loaded, plan.variants)
+      .filter((id) => !session.sentIds.has(id));
+    session.deferredFullSearch = false;
+  }
+
+  const selectedIds = session.remainingIds.splice(0, PAGE_RESULTS);
+  for (const id of selectedIds) session.sentIds.add(id);
+  const results = await hydrateResults(selectedIds);
+  return { results, hasMore: session.remainingIds.length > 0 };
+}
+
+function createSearchPlan(rawQuery: string): SearchPlan {
   const manifest = dictionaryManifest!;
   const query = normalize(rawQuery);
-  if (!query) return [];
-  const variants = [...new Set([query, toHiragana(query), toKatakana(query)])];
-  const shardFiles = new Set<string>();
-  let useBootstrap = false;
+  const variants = queryVariants(query);
+  const initialShardFiles = new Set<string>();
+  const allShardFiles = new Set<string>();
+  let deferredFullSearch = false;
 
   for (const variant of variants) {
     const shards = routeShards(manifest.searchShards, variant);
+    for (const shard of shards) allShardFiles.add(shard.file);
     const aliasCount = shards.reduce((total, shard) => total + shard.aliases, 0);
     if ([...variant].length < manifest.minFullQueryLength && aliasCount > MAX_FULL_ALIASES_FOR_SHORT_QUERY) {
-      useBootstrap = true;
+      deferredFullSearch = true;
     } else {
-      for (const shard of shards) shardFiles.add(shard.file);
+      for (const shard of shards) initialShardFiles.add(shard.file);
     }
   }
 
-  const loaded = await Promise.all([...shardFiles].map(loadSearchShard));
-  const aliasSets = useBootstrap ? [bootstrapAliases, ...loaded] : loaded;
-  const candidates = collectCandidates(aliasSets, variants);
-  const selectedIds = [...candidates]
+  return {
+    variants,
+    initialShardFiles: [...initialShardFiles],
+    allShardFiles: [...allShardFiles],
+    deferredFullSearch,
+  };
+}
+
+function rankCandidates(aliasSets: Alias[][], variants: string[]) {
+  return [...collectCandidates(aliasSets, variants)]
     .sort((left, right) =>
       left[1].score - right[1].score ||
       left[1].cost - right[1].cost ||
       left[1].surfaceLength - right[1].surfaceLength ||
       left[0] - right[0],
     )
-    .slice(0, MAX_RESULTS)
     .map(([id]) => id);
+}
 
+function rankSampleCandidates(variants: string[]) {
+  return [...collectCandidates([sampleAliases], variants)]
+    .map(([id, ranking]) => ({ entry: entries.get(id), ranking }))
+    .filter((candidate): candidate is { entry: Entry; ranking: typeof candidate.ranking } =>
+      Boolean(candidate.entry),
+    )
+    .sort((left, right) =>
+      left.ranking.score - right.ranking.score ||
+      left.entry.cost - right.entry.cost ||
+      left.entry.surface.length - right.entry.surface.length ||
+      left.entry.id - right.entry.id,
+    )
+    .map(({ entry }) => entry.id);
+}
+
+async function hydrateResults(selectedIds: number[]) {
+  if (mode === "sample") {
+    return selectedIds.map((id) => entries.get(id)).filter(Boolean).map((entry) => toResult(entry!));
+  }
   await loadRecordIds(selectedIds);
   const splitIds = selectedIds.flatMap((id) => {
     const entry = entries.get(id);
@@ -223,22 +340,9 @@ function collectCandidates(aliasSets: Alias[][], variants: string[]) {
   return candidates;
 }
 
-function searchSample(rawQuery: string): LookupResult[] {
+function queryVariants(rawQuery: string) {
   const query = normalize(rawQuery);
-  if (!query) return [];
-  const variants = [...new Set([query, toHiragana(query), toKatakana(query)])];
-  const candidates = collectCandidates([sampleAliases], variants);
-  return [...candidates]
-    .map(([id, ranking]) => ({ entry: entries.get(id)!, ranking }))
-    .filter(({ entry }) => Boolean(entry))
-    .sort((left, right) =>
-      left.ranking.score - right.ranking.score ||
-      left.entry.cost - right.entry.cost ||
-      left.entry.surface.length - right.entry.surface.length ||
-      left.entry.id - right.entry.id,
-    )
-    .slice(0, MAX_RESULTS)
-    .map(({ entry }) => toResult(entry));
+  return [...new Set([query, toHiragana(query), toKatakana(query)])];
 }
 
 function toResult(entry: Entry): LookupResult {

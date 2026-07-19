@@ -172,7 +172,8 @@ The application will therefore use two tiers:
 1. **Bootstrap suggestions:** a small eagerly loaded index containing a limited
    number of high-quality results for short prefixes.
 2. **Full prefix shards:** lazily loaded sorted aliases for queries long enough
-   to route to a reasonably bounded data partition.
+   to route to a reasonably bounded data partition, or when the user continues
+   beyond the bootstrap results for a broad query.
 
 The exact transition—probably one versus two or more characters—will be chosen
 from generated size statistics rather than hard-coded as an architectural
@@ -268,7 +269,11 @@ The runtime should:
 - Keep decoded shards in a memory-bounded LRU cache.
 - Allow the browser HTTP cache to retain compressed responses.
 - Return a first result frame before optional details finish loading.
-- Limit rendered results, initially to approximately 20.
+- Return approximately 20 results initially, then append continuation pages as
+  the user approaches the end of the list.
+- Preserve already displayed entries and stable deduplication when a broad
+  bootstrap search expands into complete prefix shards.
+- Cancel or ignore continuation work when a newer query becomes active.
 - Support keyboard navigation and accessible result announcements.
 
 A service worker is optional. It may cache the application shell and bootstrap

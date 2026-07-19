@@ -8,6 +8,8 @@ const INITIAL_QUERY = "選挙";
 export function LookupApp() {
   const workerRef = useRef<Worker | null>(null);
   const requestIdRef = useRef(0);
+  const loadingMoreRequestRef = useRef(false);
+  const loadMoreRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const queryRef = useRef(INITIAL_QUERY);
@@ -17,6 +19,9 @@ export function LookupApp() {
   const [dataset, setDataset] = useState("sample");
   const [activeIndex, setActiveIndex] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [automaticLoadBlocked, setAutomaticLoadBlocked] = useState(false);
 
   useEffect(() => {
     const initialQuery = queryFromLocation();
@@ -36,10 +41,23 @@ export function LookupApp() {
         search(queryRef.current, worker);
       } else if (message.type === "results") {
         if (message.requestId !== requestIdRef.current) return;
-        setResults(message.results);
-        setActiveIndex(0);
-        setExpandedId(null);
+        setResults((current) => message.append
+          ? appendUniqueResults(current, message.results)
+          : message.results,
+        );
+        setHasMore(message.hasMore);
+        loadingMoreRequestRef.current = false;
+        setLoadingMore(false);
+        setAutomaticLoadBlocked(false);
+        if (!message.append) {
+          setActiveIndex(0);
+          setExpandedId(null);
+        }
       } else {
+        if (message.requestId && message.requestId !== requestIdRef.current) return;
+        loadingMoreRequestRef.current = false;
+        setLoadingMore(false);
+        setAutomaticLoadBlocked(true);
         setStatus(message.message);
       }
     };
@@ -60,6 +78,19 @@ export function LookupApp() {
   }, []);
 
   useEffect(() => {
+    const target = loadMoreRef.current;
+    if (!target || !hasMore || loadingMore || automaticLoadBlocked) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) requestMore();
+      },
+      { rootMargin: "500px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [automaticLoadBlocked, hasMore, loadingMore, results.length]);
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
@@ -74,7 +105,24 @@ export function LookupApp() {
   function search(nextQuery: string, worker = workerRef.current) {
     if (!worker) return;
     const requestId = ++requestIdRef.current;
+    loadingMoreRequestRef.current = false;
+    setHasMore(false);
+    setLoadingMore(false);
+    setAutomaticLoadBlocked(false);
     worker.postMessage({ type: "search", requestId, query: nextQuery });
+  }
+
+  function requestMore() {
+    const worker = workerRef.current;
+    if (!worker || !hasMore || loadingMoreRequestRef.current) return;
+    loadingMoreRequestRef.current = true;
+    setLoadingMore(true);
+    setAutomaticLoadBlocked(false);
+    worker.postMessage({
+      type: "more",
+      requestId: requestIdRef.current,
+      query: queryRef.current,
+    });
   }
 
   function updateQuery(nextQuery: string) {
@@ -158,7 +206,7 @@ export function LookupApp() {
         <div className="results-header">
           <h2 className="results-title" id="results-heading">Matches</h2>
           <span className="result-count">
-            {results.length} {results.length === 1 ? "result" : "results"}
+            {results.length}{hasMore ? "+" : ""} {results.length === 1 ? "result" : "results"}
           </span>
         </div>
 
@@ -219,6 +267,23 @@ export function LookupApp() {
           })}
           {!results.length ? <div className="empty">No prefix matches.</div> : null}
         </div>
+        {results.length ? (
+          <div className="result-continuation">
+            {hasMore ? (
+              <button
+                ref={loadMoreRef}
+                type="button"
+                className="load-more"
+                disabled={loadingMore}
+                onClick={requestMore}
+              >
+                {loadingMore
+                  ? "Loading more…"
+                  : automaticLoadBlocked ? "Retry loading more" : "Load more results"}
+              </button>
+            ) : <span className="result-end">End of results</span>}
+          </div>
+        ) : null}
       </section>
 
       <footer className="footer">
@@ -231,6 +296,11 @@ export function LookupApp() {
       </footer>
     </div>
   );
+}
+
+function appendUniqueResults(current: LookupResult[], additional: LookupResult[]) {
+  const ids = new Set(current.map((result) => result.id));
+  return [...current, ...additional.filter((result) => !ids.has(result.id))];
 }
 
 function SplitPanel({
