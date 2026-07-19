@@ -195,8 +195,9 @@ The application will therefore use two tiers:
    to route to a reasonably bounded data partition, or when the user continues
    beyond the bootstrap results for a broad query.
 
-Format v7 makes the transition from generated cost statistics rather than
-query length. A prefix is eligible either when it matches at least 500 aliases
+Format v7 introduced bootstrap selection from generated cost statistics rather
+than query length, and format v8 retains that model. A prefix is eligible either
+when it matches at least 500 aliases
 and routes at least 192 KiB of search data, or when its initial results require
 at least 1 MiB of record shards. The generator explores branches down to 100
 matching aliases so record-scattered queries such as `あきの` can qualify.
@@ -204,8 +205,10 @@ Eligible prefixes are prioritized by the combined search- and record-shard
 transfer they avoid, then encoded under a hard 4 MiB decoded budget. Records
 shared by multiple prefixes are stored only once. The bootstrap itself is gzip
 compressed for transfer and decompressed in the Worker. Hiragana and katakana
-variants share one bootstrap key. Continuation still expands into complete
-prefix shards.
+spellings have distinct bootstrap keys and rankings. Both bootstrap and live
+shard ranking treat the literal query script as a tie-breaker after exactness
+and alias kind, so `あま` prefers otherwise equal hiragana surfaces while
+`アマ` prefers katakana. Continuation still expands into complete prefix shards.
 
 ### 7.2 Shard routing
 
@@ -260,10 +263,12 @@ The initial deterministic ordering should prioritize:
 3. Surface prefix match
 4. Exact reading match
 5. Reading prefix match
-6. Shorter surface forms
-7. A trustworthy dictionary cost or frequency-like signal, if extraction and
+6. The literal hiragana or katakana script, when match strength is otherwise
+   equal
+7. Shorter surface forms
+8. A trustworthy dictionary cost or frequency-like signal, if extraction and
    interpretation are validated
-8. Stable entry ID as the final tie-breaker
+9. Stable entry ID as the final tie-breaker
 
 Aliases pointing to the same entry are merged before rendering. Entries with
 the same surface but different linguistic records must not be silently lost.
@@ -345,17 +350,18 @@ The manifest should contain at least:
 
 ```json
 {
-  "formatVersion": 7,
+  "formatVersion": 8,
   "dictionary": {
     "edition": "core",
     "version": "20260428"
   },
   "generatorVersion": "0.1.0",
   "bootstrapFile": "bootstrap.bin.gz",
-  "bootstrapPrefixes": 2060,
-  "bootstrapRecords": 39660,
-  "bootstrapBytes": 775326,
-  "bootstrapDecodedBytes": 4194221,
+  "kanaRanking": "literal-script-tiebreak",
+  "bootstrapPrefixes": 3832,
+  "bootstrapRecords": 38144,
+  "bootstrapBytes": 856126,
+  "bootstrapDecodedBytes": 4194261,
   "bootstrapBudgetBytes": 4194304,
   "bootstrapCompression": "gzip",
   "routing": "prefix routing data",

@@ -14,7 +14,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 7;
+const FORMAT_VERSION: u16 = 8;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const INITIAL_RESULTS: usize = 20;
@@ -65,6 +65,11 @@ struct Alias {
 struct BootstrapEntry {
     prefix: String,
     ids: Vec<u32>,
+}
+
+struct BootstrapCandidate {
+    canonical_prefix: String,
+    entries: Vec<BootstrapEntry>,
     matching_aliases: usize,
     search_bytes: u64,
     search_shards: usize,
@@ -133,6 +138,7 @@ struct Manifest {
     record_size: SizeStats,
     split_encoding: &'static str,
     headword_filter: &'static str,
+    kana_ranking: &'static str,
     source_sha256: String,
     elapsed_seconds: f64,
 }
@@ -387,9 +393,10 @@ fn alias_order(left: &Alias, right: &Alias) -> Ordering {
         .then(left.kind.cmp(&right.kind))
 }
 
-fn match_score(alias: &Alias, query: &str) -> u8 {
-    let exact = if alias.key == query { 0 } else { 20 };
-    exact + [0, 4, 2, 6][alias.kind as usize]
+fn match_score(alias: &Alias, variant: &str, literal_query: &str) -> u8 {
+    let exact = if alias.key == variant { 0 } else { 20 };
+    let base = exact + [0, 4, 2, 6][alias.kind as usize];
+    base * 2 + u8::from(variant != literal_query)
 }
 
 fn query_variants(prefix: &str) -> Vec<String> {
@@ -417,11 +424,15 @@ fn bootstrap_ranges(aliases: &[Alias], prefix: &str) -> Vec<(String, std::ops::R
         .collect()
 }
 
-fn rank_prefix(aliases: &[Alias], ranges: &[(String, std::ops::Range<usize>)]) -> Vec<u32> {
+fn rank_prefix(
+    aliases: &[Alias],
+    ranges: &[(String, std::ops::Range<usize>)],
+    literal_query: &str,
+) -> Vec<u32> {
     let mut best_by_entry: HashMap<u32, (u8, &Alias)> = HashMap::new();
     for (variant, range) in ranges {
         for alias in &aliases[range.clone()] {
-            let score = match_score(alias, variant);
+            let score = match_score(alias, variant, literal_query);
             let best = best_by_entry.entry(alias.id).or_insert((score, alias));
             if score < best.0 {
                 *best = (score, alias);
@@ -479,8 +490,22 @@ fn build_bootstrap(
             }
         }
         let search_bytes = shard_indexes.iter().map(|index| search_sizes[*index]).sum();
-        let ids = rank_prefix(aliases, &ranges);
-        let record_shards: HashSet<u32> = ids.iter().map(|id| id / RECORD_SPAN).collect();
+        let katakana_prefix = to_katakana(&prefix);
+        let mut entries = vec![BootstrapEntry {
+            prefix: prefix.clone(),
+            ids: rank_prefix(aliases, &ranges, &prefix),
+        }];
+        if katakana_prefix != prefix {
+            entries.push(BootstrapEntry {
+                prefix: katakana_prefix.clone(),
+                ids: rank_prefix(aliases, &ranges, &katakana_prefix),
+            });
+        }
+        let result_ids: HashSet<u32> = entries
+            .iter()
+            .flat_map(|entry| entry.ids.iter().copied())
+            .collect();
+        let record_shards: HashSet<u32> = result_ids.iter().map(|id| id / RECORD_SPAN).collect();
         let record_bytes = record_shards
             .iter()
             .map(|index| record_sizes[*index as usize])
@@ -489,9 +514,9 @@ fn build_bootstrap(
             && search_bytes >= BOOTSTRAP_MIN_SEARCH_BYTES;
         let expensive_records = record_bytes >= BOOTSTRAP_MIN_RECORD_BYTES;
         if broad_search || expensive_records {
-            candidates.push(BootstrapEntry {
-                prefix: prefix.clone(),
-                ids,
+            candidates.push(BootstrapCandidate {
+                canonical_prefix: prefix.clone(),
+                entries,
                 matching_aliases,
                 search_bytes,
                 search_shards: shard_indexes.len(),
@@ -527,23 +552,31 @@ fn build_bootstrap(
             .then(right.matching_aliases.cmp(&left.matching_aliases))
             .then(right.search_shards.cmp(&left.search_shards))
             .then(right.record_shards.cmp(&left.record_shards))
-            .then(left.prefix.cmp(&right.prefix))
+            .then(left.canonical_prefix.cmp(&right.canonical_prefix))
     });
     let mut bytes = 14_usize;
     let mut selected = Vec::new();
     let mut selected_record_ids = HashSet::new();
     for candidate in candidates {
-        let candidate_bytes = bootstrap_entry_bytes(&candidate)
-            + candidate
-                .ids
+        let candidate_ids: HashSet<u32> = candidate
+            .entries
+            .iter()
+            .flat_map(|entry| entry.ids.iter().copied())
+            .collect();
+        let candidate_bytes = candidate
+            .entries
+            .iter()
+            .map(bootstrap_entry_bytes)
+            .sum::<usize>()
+            + candidate_ids
                 .iter()
                 .filter(|id| !selected_record_ids.contains(*id))
                 .map(|id| record_entry_sizes[*id as usize])
                 .sum::<usize>();
         if bytes + candidate_bytes <= BOOTSTRAP_BUDGET_BYTES {
             bytes += candidate_bytes;
-            selected_record_ids.extend(candidate.ids.iter().copied());
-            selected.push(candidate);
+            selected_record_ids.extend(candidate_ids);
+            selected.extend(candidate.entries);
         }
     }
     selected.sort_unstable_by(|left, right| left.prefix.cmp(&right.prefix));
@@ -775,6 +808,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         record_size: stats(record_sizes),
         split_encoding: "u8-code-point-boundaries",
         headword_filter: "dictionary-form-word-id",
+        kana_ranking: "literal-script-tiebreak",
         source_sha256: sha256_file(input)?,
         elapsed_seconds: started.elapsed().as_secs_f64(),
     };
@@ -912,6 +946,28 @@ mod tests {
         };
         let aliases = vec![exact, prefix];
         let ranges = bootstrap_ranges(&aliases, "い");
-        assert_eq!(rank_prefix(&aliases, &ranges), vec![1, 2]);
+        assert_eq!(rank_prefix(&aliases, &ranges, "い"), vec![1, 2]);
+    }
+
+    #[test]
+    fn bootstrap_ranking_prefers_the_literal_kana_script() {
+        let hiragana = Alias {
+            key: "あま".into(),
+            id: 1,
+            kind: 0,
+            cost: 0,
+            surface_length: 2,
+        };
+        let katakana = Alias {
+            key: "アマ".into(),
+            id: 2,
+            kind: 0,
+            cost: 0,
+            surface_length: 2,
+        };
+        let aliases = vec![hiragana, katakana];
+        let ranges = bootstrap_ranges(&aliases, "あま");
+        assert_eq!(rank_prefix(&aliases, &ranges, "あま"), vec![1, 2]);
+        assert_eq!(rank_prefix(&aliases, &ranges, "アマ"), vec![2, 1]);
     }
 }

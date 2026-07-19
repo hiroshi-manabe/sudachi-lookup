@@ -7,16 +7,19 @@ const root = resolve(import.meta.dirname, "../..");
 const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v7`;
+const dataset = `${release}-v8`;
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 7) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== 8) throw new Error("Unexpected web format version");
 if (manifest.splitEncoding !== "u8-code-point-boundaries") {
   throw new Error("Unexpected split encoding");
 }
 if (manifest.headwordFilter !== "dictionary-form-word-id") {
   throw new Error("Unexpected headword filter");
+}
+if (manifest.kanaRanking !== "literal-script-tiebreak") {
+  throw new Error("Unexpected kana ranking");
 }
 if (manifest.searchableEntries + manifest.filteredInflectionEntries !== manifest.entries) {
   throw new Error("Headword counts do not cover every source record");
@@ -38,7 +41,7 @@ if (bootstrapDecoded.byteLength > manifest.bootstrapBudgetBytes) {
 }
 if (
   bootstrapDecoded.toString("utf8", 0, 4) !== "SDBP" ||
-  bootstrapDecoded.readUInt16LE(4) !== 7 ||
+  bootstrapDecoded.readUInt16LE(4) !== 8 ||
   bootstrapDecoded.readUInt32LE(6) !== manifest.bootstrapPrefixes
 ) {
   throw new Error("Invalid bootstrap header");
@@ -51,7 +54,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 7 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== 8 || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -158,7 +161,7 @@ function validateBootstrap(bytes, manifest) {
     if (!recordIds.has(id)) throw new Error(`Bootstrap result ${id} has no embedded record`);
   }
   if (edition === "core") {
-    for (const prefix of ["い", "あい", "あお", "あきの"]) {
+    for (const prefix of ["い", "イ", "あい", "アイ", "あお", "アオ", "あきの", "アキノ"]) {
       if (!prefixes.has(prefix)) throw new Error(`Required Core bootstrap prefix is missing: ${prefix}`);
     }
   }
@@ -174,7 +177,7 @@ async function validateRecordShard(path, firstExpectedId) {
   offset += 2;
   const count = bytes.readUInt32LE(offset);
   offset += 4;
-  if (magic !== "SDRE" || version !== 7) throw new Error(`Invalid record shard header: ${path}`);
+  if (magic !== "SDRE" || version !== 8) throw new Error(`Invalid record shard header: ${path}`);
 
   const readString = () => {
     const length = bytes.readUInt16LE(offset);

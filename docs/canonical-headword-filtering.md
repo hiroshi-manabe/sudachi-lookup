@@ -2,7 +2,7 @@
 
 ## Status
 
-Stage 1 is implemented in browser-data format v5 and retained through v7 for both
+Stage 1 is implemented in browser-data format v5 and retained through v8 for both
 pinned Core and Full editions. Search aliases and bootstrap results refer only
 to canonical dictionary-form identities. The neutral export and browser record
 shards still retain every source record. Stage 2 record compaction remains
@@ -86,7 +86,7 @@ headword matched, but filtering does not depend on exposing that metadata.
 
 ## Staged implementation
 
-### Stage 1: filter search aliases (implemented in v5 through v7)
+### Stage 1: filter search aliases (implemented in v5 through v8)
 
 - Preserve every record in the neutral export and browser record shards.
 - Add and validate the upstream dictionary-form word ID.
@@ -107,7 +107,7 @@ After Stage 1 behavior is accepted:
 - Rewrite search postings to those IDs.
 - Retain a release report mapping browser IDs to pinned Sudachi word IDs.
 
-Formats v5 through v7 retain v4's surface-boundary representation, which makes this
+Formats v5 through v8 retain v4's surface-boundary representation, which makes this
 easier: Structure, A, and B display data no longer require component record IDs
 to remain present in the browser corpus.
 
@@ -165,6 +165,14 @@ selects 2,079 of 22,501 and embeds 40,082 records in 784,848 bytes. The decoded
 sizes remain just below 4 MiB. Core checks for `い`, `あい`, `あお`, and `あきの`
 reproduce the complete search's top 20 and can render those results without
 another dictionary request.
+
+Format v8 retains the same canonical filter and split representation while
+adding literal-kana preference. Each selected kana prefix may store separate
+hiragana and katakana top-20 rankings under the same decoded bootstrap budget.
+Core emits 3,832 bootstrap keys and 38,144 embedded records in 856,126
+transferred bytes; Full emits 3,841 keys and 38,260 records in 866,314 bytes.
+For paired queries such as `い`/`イ`, `あい`/`アイ`, and `あま`/`アマ`, the
+otherwise equal surface result matching the typed script ranks first.
 
 ## Product effect
 

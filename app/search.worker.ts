@@ -26,9 +26,10 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 7;
+  formatVersion: 8;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
+  kanaRanking: "literal-script-tiebreak";
   dataset: string;
   entries: number;
   searchableEntries: number;
@@ -51,8 +52,8 @@ type DictionaryManifest = {
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v7",
-  "/data/releases/core-20260428-v7",
+  "/data/releases/full-20260428-v8",
+  "/data/releases/core-20260428-v8",
 ];
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
@@ -152,9 +153,10 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 7 ||
+      dictionaryManifest.formatVersion !== 8 ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
       dictionaryManifest.headwordFilter !== "dictionary-form-word-id" ||
+      dictionaryManifest.kanaRanking !== "literal-script-tiebreak" ||
       dictionaryManifest.bootstrapCompression !== "gzip"
     ) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
@@ -249,7 +251,7 @@ function createSearchPlan(rawQuery: string): SearchPlan {
   const manifest = dictionaryManifest!;
   const query = normalize(rawQuery);
   const variants = queryVariants(query);
-  const bootstrapIds = bootstrapResults.get(toHiragana(query)) ?? null;
+  const bootstrapIds = bootstrapResults.get(query) ?? null;
   const initialShardFiles = new Set<string>();
   const allShardFiles = new Set<string>();
   const deferredFullSearch = bootstrapIds !== null;
@@ -344,7 +346,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 7);
+      return decodeAliases(await response.arrayBuffer(), 8);
     });
     searchCache.set(file, promise);
   }
@@ -359,7 +361,7 @@ function loadRecordShard(index: number) {
     if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 7)) {
+      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 8)) {
         entries.set(id, entry);
       }
     });
@@ -370,13 +372,15 @@ function loadRecordShard(index: number) {
 
 function collectCandidates(aliasSets: Alias[][], variants: string[]) {
   const candidates = new Map<number, { score: number; cost: number; surfaceLength: number }>();
+  const literalQuery = variants[0];
   for (const aliases of aliasSets) {
     for (const variant of variants) {
       let index = lowerBound(aliases, variant);
       while (index < aliases.length && aliases[index].key.startsWith(variant)) {
         const alias = aliases[index];
         const exact = alias.key === variant;
-        const score = (exact ? 0 : 20) + [0, 4, 2, 6][alias.kind];
+        const baseScore = (exact ? 0 : 20) + [0, 4, 2, 6][alias.kind];
+        const score = baseScore * 2 + Number(variant !== literalQuery);
         const previous = candidates.get(alias.id);
         if (!previous || score < previous.score) {
           candidates.set(alias.id, {
@@ -474,7 +478,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 7) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 8) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -488,7 +492,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 7) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 7) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 8) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -509,7 +513,7 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 7) {
 function decodeBootstrap(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDBP");
-  reader.version(7);
+  reader.version(8);
   const count = reader.u32();
   const results = new Map<string, number[]>();
   for (let index = 0; index < count; index += 1) {
@@ -525,7 +529,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   const recordCount = reader.u32();
   const bootstrapEntries = new Map<number, Entry>();
   for (let index = 0; index < recordCount; index += 1) {
-    const [id, entry] = decodeEntry(reader, 7);
+    const [id, entry] = decodeEntry(reader, 8);
     bootstrapEntries.set(id, entry);
   }
   reader.done();
@@ -537,7 +541,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   return { results, entries: bootstrapEntries };
 }
 
-function decodeEntry(reader: BinaryReader, version: 2 | 7): [number, Entry] {
+function decodeEntry(reader: BinaryReader, version: 2 | 8): [number, Entry] {
   const id = reader.u32();
   const cost = version === 2 ? reader.u16() : reader.i16();
   const surface = reader.string();
