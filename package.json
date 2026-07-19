@@ -11,6 +11,7 @@
     "preview": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "build:pages": "node tools/site/build-pages.mjs",
     "preview:pages": "vite preview --config vite.pages.config.ts",
+    "deploy:pages:staging": "npm run build:pages -- --edition sample && node tools/site/deploy-pages.mjs --branch staging",
     "data:sample": "node tools/dictionary/build-sample.mjs",
     "data:core": "SUDACHI_EDITION=core node tools/dictionary/export-dictionary.mjs",
     "data:core:web": "SUDACHI_EDITION=core node tools/dictionary/build-dictionary-web.mjs",

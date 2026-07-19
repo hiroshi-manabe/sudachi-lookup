@@ -91,15 +91,19 @@ are absent.
 ## Next milestone
 
 The deterministic static Pages assembly target is implemented and accepts
-exactly one of `sample`, `core`, or `full`. The next step is the first hosted
-sample deployment on a Wrangler-created `pages.dev` preview; Core and Full will
-follow as separate, explicitly selected releases.
+exactly one of `sample`, `core`, or `full`. The sample is deployed at
+<https://staging.sudachi-lookup.pages.dev>; Core and Full will follow as
+separate, explicitly selected releases.
 
 The current Vinext build remains useful for local development, but its
 Worker-oriented output and locally copied generated datasets must not be
 uploaded to Pages unchanged. Use `npm run build:pages -- --edition sample` and
 serve the result with `npm run preview:pages`. The deployment runbook and
 acceptance checks are in [docs/development.md](docs/development.md).
+
+The repeatable sample preview command is `npm run deploy:pages:staging`. It
+always rebuilds the sample artifact before uploading, so ignored local Core or
+Full data cannot leak into an ordinary preview.
 
 After the sample preview proves the delivery path, validate the prepared Core
 build under production-like HTTP compression and measure:

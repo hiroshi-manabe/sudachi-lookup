@@ -177,6 +177,10 @@ control. If native pull-request previews later become more valuable than the
 controlled assembly pipeline, create a separate Git-integrated sample project
 rather than changing the production project.
 
+The Direct Upload project is named `sudachi-lookup`, with `main` configured as
+its production branch. Its first sample deployment is available on the
+`staging` preview alias at <https://staging.sudachi-lookup.pages.dev>.
+
 After the deterministic static output exists, create the project interactively:
 
 ```sh
@@ -192,6 +196,12 @@ npm run build:pages -- --edition sample
 npx wrangler pages deploy dist/pages \
   --project-name=sudachi-lookup \
   --branch=staging
+```
+
+For subsequent sample previews, the repository packages that sequence as:
+
+```sh
+npm run deploy:pages:staging
 ```
 
 The preview should be accepted only after verifying:
