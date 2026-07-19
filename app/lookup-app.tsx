@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
 
-const INITIAL_QUERY = "選挙";
-type SearchState = "loading" | "searching" | "settled" | "error";
+const INITIAL_QUERY = "";
+type SearchState = "loading" | "idle" | "searching" | "settled" | "error";
 
 export function LookupApp() {
   const workerRef = useRef<Worker | null>(null);
@@ -110,13 +110,17 @@ export function LookupApp() {
     if (!worker) return;
     const requestId = ++requestIdRef.current;
     loadingMoreRequestRef.current = false;
-    setSearchState("searching");
     setResults([]);
     setActiveIndex(0);
     setExpandedId(null);
     setHasMore(false);
     setLoadingMore(false);
     setAutomaticLoadBlocked(false);
+    if (!nextQuery.normalize("NFKC").trim()) {
+      setSearchState("idle");
+      return;
+    }
+    setSearchState("searching");
     worker.postMessage({ type: "search", requestId, query: nextQuery });
   }
 
@@ -220,6 +224,8 @@ export function LookupApp() {
           <span className="result-count">{
             searchState === "loading"
               ? "Loading…"
+              : searchState === "idle"
+                ? "0 results"
               : searchState === "searching"
                 ? "Searching…"
                 : searchState === "error"
@@ -289,6 +295,8 @@ export function LookupApp() {
             <div className="empty">{
               searchState === "loading"
                 ? "Loading dictionary…"
+                : searchState === "idle"
+                  ? "Enter a word to search."
                 : searchState === "searching"
                   ? "Searching…"
                   : searchState === "error"
