@@ -71,6 +71,12 @@ Generated dictionary assets should not be edited manually. Each release should
 record the source dictionary edition and version, generator version, data-format
 version, checksums, and applicable notices.
 
+The next browser-data policy will distinguish dictionary headwords from
+Sudachi's internal conjugation-state records. The neutral export remains
+lossless, while the web index will move toward canonical headword results as
+described in
+[docs/canonical-headword-filtering.md](docs/canonical-headword-filtering.md).
+
 ## Run with SudachiDict Core locally
 
 After installing the pinned local data prerequisites described in the

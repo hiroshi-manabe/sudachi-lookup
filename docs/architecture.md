@@ -105,6 +105,16 @@ together remain below the Cloudflare Pages Free-plan file allowance. Pages is
 therefore the default host for both editions; object storage is a contingency,
 not a prerequisite.
 
+### 4.6 Publish canonical headwords, not tokenizer inflection records
+
+The neutral export remains a lossless representation of the pinned Sudachi
+lexicon, but the browser search index should expose canonical dictionary-form
+identities rather than every conjugation-state record used during tokenization.
+Filtering must use the upstream dictionary-form word ID and preserve distinct
+homographs; surface-string grouping is insufficient. The staged policy and its
+validation requirements are defined in
+[Canonical Headword Filtering](canonical-headword-filtering.md).
+
 ## 5. Logical data model
 
 The following TypeScript describes semantics, not the on-disk encoding:
@@ -114,6 +124,8 @@ type EntryId = number
 
 interface Entry {
   id: EntryId
+  sourceWordId: number
+  canonicalSourceWordId: number
   surface: string
   normalizedForm: string
   dictionaryForm: string
