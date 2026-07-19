@@ -1,0 +1,452 @@
+# Sudachi Lookup: Product and Architecture Specification
+
+## 1. Purpose
+
+Sudachi Lookup will make the Sudachi Japanese lexicon searchable without a
+server-side search service. Once the static application and relevant data
+shards have been downloaded, queries stay inside the browser.
+
+The defining interaction is immediate lookup while typing. A result that is a
+Sudachi C unit can be expanded to show its B and A segmentation, for example:
+
+```text
+A  選挙 / 管理 / 委員 / 会
+B  選挙 / 管理 / 委員会
+C  選挙管理委員会
+```
+
+This is a lexicon browser, not initially a general-purpose morphological
+analyzer for arbitrary sentences. Full tokenization can be considered later,
+but it should not complicate the first data format or delivery model.
+
+## 2. Goals
+
+- Run search and ranking entirely in the browser.
+- Update results quickly enough to follow normal typing and Japanese IME use.
+- Search surface, dictionary, normalized, and reading forms.
+- Match readings entered in either hiragana or katakana.
+- Preserve homographs and other distinct Sudachi dictionary records.
+- Present A, B, and C segmentation using Sudachi's own split metadata.
+- Deploy as immutable static assets on Cloudflare Pages.
+- Make dictionary generation reproducible from a pinned upstream release.
+- Keep initial transfer, incremental transfer, and browser memory bounded.
+
+## 3. Non-goals for the first release
+
+- Arbitrary substring, typo-tolerant, or semantic search
+- Server-side APIs, authentication, accounts, or synchronized history
+- Editing or maintaining user dictionaries in the browser
+- Reimplementing the complete Sudachi tokenizer in JavaScript
+- Shipping all SudachiDict editions on the first deployment
+- Treating surface text as a unique dictionary identifier
+
+## 4. Key decisions
+
+### 4.1 Generate a lookup-specific dataset
+
+The deployed data will be an offline derivative of a pinned SudachiDict
+release, not the original compiled dictionary. The lookup product needs sorted
+search keys and random access to entry details; it does not need the tokenizer's
+connection matrix and every runtime structure.
+
+This separation also avoids relying on an unfinished browser-WASM path. As of
+July 2026, browser and JavaScript-environment support remains an open request in
+the sudachi.rs project:
+[sudachi.rs issue list](https://github.com/WorksApplications/sudachi.rs/issues).
+
+### 4.2 Use compact binary shards, not JavaScript or JSON records
+
+Large JavaScript modules force the browser to parse source code and allocate a
+large object graph. JSON has similar allocation costs and repeats field names
+and strings. The production format should instead use `ArrayBuffer`, typed
+arrays, integer offsets, shared string tables, and variable-length integers
+where measurements show a benefit.
+
+The first prototype may use MessagePack or CBOR to establish correctness.
+Before stabilizing the format, compare that output with a small custom binary
+encoding. The custom format is justified only if it materially reduces bytes,
+decode time, or memory.
+
+### 4.3 Route prefix queries to bounded static files
+
+A single database or monolithic index makes first-load performance depend on
+downloading most or all of the corpus. Instead, search assets will be partitioned
+by normalized leading characters and subdivided until each compressed shard is
+below a configured size ceiling.
+
+The routing scheme must be prefix-preserving. Hash-sharding the search keys
+would distribute a prefix query across every shard and is therefore unsuitable.
+
+### 4.4 Preserve Sudachi word identities and split references
+
+Sudachi can contain multiple entries with the same surface. Each extracted
+dictionary record therefore receives an internal stable ID derived from the
+pinned input, while UI-level grouping remains optional.
+
+Sudachi WordInfo exposes A- and B-unit split data. The generator will resolve
+and validate those relationships rather than infer splits from strings. The
+available fields are documented in
+[SudachiPy WordInfo subsetting](https://worksapplications.github.io/sudachi.rs/python/topics/subsetting.html).
+
+### 4.5 Use SudachiDict Core first
+
+Core should provide enough breadth to validate search quality and storage
+behavior without beginning with the largest edition. Small and Full can later
+be generated from the same pipeline and offered as deployment choices or
+optional data packs.
+
+## 5. Logical data model
+
+The following TypeScript describes semantics, not the on-disk encoding:
+
+```ts
+type EntryId = number
+
+interface Entry {
+  id: EntryId
+  surface: string
+  normalizedForm: string
+  dictionaryForm: string
+  readingForm: string
+  posId: number
+  aSplit: EntryId[]
+  bSplit: EntryId[]
+  synonymGroupIds?: number[]
+  rankingSignal?: number
+}
+
+interface SearchAlias {
+  key: string
+  entryId: EntryId
+  kind: "surface" | "dictionary" | "normalized" | "reading"
+}
+```
+
+`aSplit` and `bSplit` are empty when no further split exists. A split sequence
+may contain entries whose displayed surface depends on the parent context, so
+the generator must test actual upstream behavior before assuming that every
+child surface can always be rendered from a global entry table alone. If
+necessary, a split component can store an entry ID plus a contextual surface.
+
+Part-of-speech arrays and other repeated values should use interned IDs. Empty
+or identical forms may be represented as references to `surface` rather than
+duplicate strings.
+
+## 6. Query normalization
+
+At index-generation time, emit aliases for the useful Sudachi forms. At query
+time:
+
+1. Apply Unicode NFKC normalization.
+2. Lowercase Latin text consistently with the index generator.
+3. Retain the normalized literal query for surface lookup.
+4. Produce katakana and hiragana variants for reading lookup.
+5. Avoid transliteration from romaji in the first release unless user testing
+   demonstrates a need.
+
+Sudachi performs NFKC-based input normalization and stores dictionary-specific
+normalized forms. Indexing the provided normalized form is necessary; applying
+NFKC alone is not equivalent to Sudachi normalization. See the
+[Sudachi project documentation](https://github.com/WorksApplications/Sudachi#normalized-form).
+
+IME composition events must be handled explicitly. The interface should not
+continually replace results based on unstable intermediate composition text
+unless testing shows that behavior is useful.
+
+## 7. Search index
+
+### 7.1 Two-tier lookup
+
+One-character Japanese prefixes can represent very large portions of the
+dictionary. Loading their complete postings would make the first keystroke the
+worst request.
+
+The application will therefore use two tiers:
+
+1. **Bootstrap suggestions:** a small eagerly loaded index containing a limited
+   number of high-quality results for short prefixes.
+2. **Full prefix shards:** lazily loaded sorted aliases for queries long enough
+   to route to a reasonably bounded data partition.
+
+The exact transition—probably one versus two or more characters—will be chosen
+from generated size statistics rather than hard-coded as an architectural
+assumption.
+
+### 7.2 Shard routing
+
+The manifest maps a query prefix to one or more files. A conceptual layout is:
+
+```text
+public/data/
+  manifest.json
+  20260428-core-v1/
+    bootstrap.ab12cd.bin
+    pos.0237a1.bin
+    search/
+      せん.40f1be.bin
+      選挙.249a91.bin
+    records/
+      000.92dba2.bin
+      001.88ea31.bin
+    notices/
+      NOTICE.txt
+      LICENSE-2.0.txt
+```
+
+Logical prefixes must be converted to portable, URL-safe filenames or opaque
+IDs in the final implementation. Human-readable names above are illustrative.
+
+The build process starts with leading-character partitions, measures their
+compressed sizes, and recursively subdivides large partitions. The target is a
+bounded transfer such as 100–300 KiB compressed per query shard, subject to
+prototype results.
+
+### 7.3 Posting contents
+
+Search postings should include enough information to rank and render the first
+result frame without fetching all entry details. Candidate fields include:
+
+- Entry ID
+- Display surface reference
+- Reading reference
+- POS ID
+- Alias kind
+- Ranking signal
+
+Full normalized and dictionary forms, synonym groups, and split references can
+remain in record shards loaded after a result is selected or expanded.
+
+### 7.4 Ranking
+
+The initial deterministic ordering should prioritize:
+
+1. Exact surface match
+2. Exact dictionary- or normalized-form match
+3. Surface prefix match
+4. Exact reading match
+5. Reading prefix match
+6. Shorter surface forms
+7. A trustworthy dictionary cost or frequency-like signal, if extraction and
+   interpretation are validated
+8. Stable entry ID as the final tie-breaker
+
+Aliases pointing to the same entry are merged before rendering. Entries with
+the same surface but different linguistic records must not be silently lost.
+
+## 8. Browser runtime
+
+Search and decoding run in a Web Worker so that typing, IME composition, and
+rendering stay responsive.
+
+```text
+Input event
+    |
+    v
+Query normalization and monotonically increasing request ID
+    |
+    v
+Web Worker -> manifest route -> shard cache/fetch -> binary search -> ranking
+    |
+    v
+Top results returned to UI
+    |
+    v
+Selected result -> detail shard -> A/B/C expansion
+```
+
+The runtime should:
+
+- Debounce lightly, approximately 40–80 ms, subject to testing.
+- Discard results from stale request IDs.
+- Abort fetches when practical, without relying on abort for correctness.
+- Keep decoded shards in a memory-bounded LRU cache.
+- Allow the browser HTTP cache to retain compressed responses.
+- Return a first result frame before optional details finish loading.
+- Limit rendered results, initially to approximately 20.
+- Support keyboard navigation and accessible result announcements.
+
+A service worker is optional. It may cache the application shell and bootstrap
+index, but ordinary immutable HTTP caching is sufficient for the first release.
+
+## 9. Build pipeline
+
+The dictionary builder is a versioned command-line program and is never run in
+the browser.
+
+```text
+Pinned edition and release
+    -> verify source checksum
+    -> extract lexical records and upstream IDs
+    -> resolve A/B split information
+    -> normalize and generate search aliases
+    -> intern repeated strings and POS values
+    -> build bootstrap suggestions
+    -> build and size-balance prefix shards
+    -> build record shards
+    -> emit manifest, hashes, statistics, and notices
+    -> run integrity and search fixtures
+```
+
+Prefer the most stable supported upstream extraction interface. The prototype
+must explicitly document whether it consumes released source data, a compiled
+dictionary dump, or library APIs. It must not depend silently on private binary
+layouts that can change between Sudachi releases.
+
+The manifest should contain at least:
+
+```json
+{
+  "formatVersion": 1,
+  "dictionary": {
+    "edition": "core",
+    "version": "20260428"
+  },
+  "generatorVersion": "0.1.0",
+  "bootstrap": "bootstrap.ab12cd.bin",
+  "routing": "prefix routing data",
+  "recordPartitioning": "record partition metadata"
+}
+```
+
+## 10. Validation requirements
+
+### Data integrity
+
+- Every referenced A/B split component resolves.
+- Every search posting resolves to a record.
+- Split results match the pinned Sudachi implementation for fixtures.
+- Duplicate surfaces remain represented.
+- UTF-8 and string-table offsets stay within bounds.
+- Manifest hashes match emitted files.
+- Builds from the same pinned inputs are byte-for-byte reproducible where
+  practical.
+
+### Search behavior
+
+- Exact surface, normalized-form, dictionary-form, and reading fixtures pass.
+- Hiragana and katakana queries return equivalent reading matches.
+- Ranking is deterministic.
+- Stale worker responses never replace newer results.
+- Empty, punctuation-only, Latin, numeric, and very long queries are safe.
+
+### Performance budgets
+
+The prototype should report rather than guess:
+
+- Total compressed and uncompressed output
+- Bootstrap transfer and decode time
+- Median, p95, and maximum shard size
+- Cold and warm query latency
+- Peak worker memory during representative sessions
+- Number of network requests for representative query sequences
+- Coverage of entries carrying A/B split data
+
+Concrete release budgets should be established after the first Core build.
+
+## 11. Cloudflare Pages deployment
+
+The production site consists only of static application files and dictionary
+assets. Pages Functions, D1, KV, and R2 are unnecessary for the initial design.
+
+Versioned and content-hashed data files can use:
+
+```text
+Cache-Control: public, max-age=31556952, immutable
+```
+
+HTML and the current manifest should remain revalidatable so a deployment can
+switch atomically to a new versioned data directory. Cloudflare Pages supports
+custom `_headers` rules and Brotli delivery for static assets:
+
+- [Headers](https://developers.cloudflare.com/pages/configuration/headers/)
+- [Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/)
+
+The design deliberately avoids remote SQLite range reads because Cloudflare
+Pages currently documents `200` responses for HTTP range requests rather than
+spec-compliant partial `206` responses. Pages also limits an individual static
+asset to 25 MiB, another reason to produce bounded shards:
+
+- [Serving Pages](https://developers.cloudflare.com/pages/configuration/serving-pages/#behavior)
+- [Pages limits](https://developers.cloudflare.com/pages/platform/limits/)
+
+A custom subdomain is the simplest production setup. Cloudflare documents both
+subdomain and apex-domain configuration at
+[Custom domains](https://developers.cloudflare.com/pages/configuration/custom-domains/).
+
+## 12. Licensing and attribution
+
+SudachiDict is licensed under Apache License 2.0 and includes UniDic and part of
+NEologd. The generator and deployment process must preserve the upstream
+license, copyright, and required attribution notices. The application should
+show the exact dictionary edition and version and provide an accessible notices
+page.
+
+Before publishing the derivative dataset, review the upstream `LEGAL`, license,
+and source-component notices for the pinned release rather than relying only on
+the repository summary. See
+[SudachiDict](https://github.com/WorksApplications/SudachiDict#licenses).
+
+No license for this repository's original code should be assumed until the
+owner explicitly chooses one.
+
+## 13. Risks and mitigations
+
+| Risk | Mitigation |
+| --- | --- |
+| Very large first-character partitions | Bootstrap top results and recursively size-bounded shards |
+| Excessive browser memory | Worker decoding, compact arrays, and an LRU budget |
+| Duplicate or ambiguous entries | Preserve stable entry IDs and group only in the UI |
+| Split references change across releases | Pin releases and validate fixtures during every build |
+| Binary format becomes difficult to evolve | Version the format and keep the manifest explicit |
+| Search quality suffers without corpus frequency | Start with deterministic linguistic ranking and measure real queries |
+| New dictionary deployment mixes old and new assets | Content-hashed immutable files and one version-selecting manifest |
+| Upstream extraction API changes | Isolate extraction behind a tested adapter and pin tool versions |
+| Licensing notices are incomplete | Package notices from the exact pinned release and review before publish |
+
+## 14. Delivery roadmap
+
+### Phase 1: data feasibility
+
+- Pin one SudachiDict Core release.
+- Extract entries and split relationships.
+- Generate search aliases and size-balanced shards.
+- Produce integrity, size, latency, and memory reports.
+- Decide the initial binary encoding from measurements.
+
+### Phase 2: functional browser prototype
+
+- Implement the worker protocol and shard cache.
+- Add incremental search and deterministic ranking.
+- Render entry metadata and A/B/C segmentation.
+- Test IME, keyboard, mobile, and accessibility behavior.
+
+### Phase 3: production static site
+
+- Finalize the interface and responsive presentation.
+- Add dictionary version and notices pages.
+- Configure immutable asset headers and deployment previews.
+- Deploy to Cloudflare Pages and connect the custom domain.
+
+### Phase 4: optional expansion
+
+- Add Small and Full editions.
+- Offer an explicit offline/full-data download.
+- Evaluate substring or fuzzy search from observed demand.
+- Evaluate arbitrary-text tokenization independently from lexicon lookup.
+
+## 15. Open questions
+
+These should be answered by the feasibility prototype or product testing:
+
+- Which upstream extraction path is most stable and reproducible?
+- How many Core records and aliases result after preserving homographs?
+- What ranking signal, if any, is appropriate beyond match kind and length?
+- What shard ceiling gives the best latency/request-count balance?
+- Should short-prefix suggestions be global or separated by alias kind?
+- Does contextual surface text need to accompany split entry references?
+- Should result grouping default to linguistic entries or visible headwords?
+- Is an optional locally installed Full edition worth supporting?
+
+The architecture is considered validated when the Core prototype meets agreed
+transfer, latency, memory, integrity, and search-quality budgets without a
+server-side component.
