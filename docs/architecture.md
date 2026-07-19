@@ -95,6 +95,12 @@ behavior without beginning with the largest edition. Small and Full can later
 be generated from the same pipeline and offered as deployment choices or
 optional data packs.
 
+The subsequent Full feasibility run showed that the same v2 pipeline produces
+4,293 Full dictionary files and keeps every file below 1 MiB raw. Core and Full
+together remain below the Cloudflare Pages Free-plan file allowance. Pages is
+therefore the default host for both editions; object storage is a contingency,
+not a prerequisite.
+
 ## 5. Logical data model
 
 The following TypeScript describes semantics, not the on-disk encoding:
@@ -287,10 +293,12 @@ Pinned edition and release
     -> run integrity and search fixtures
 ```
 
-Prefer the most stable supported upstream extraction interface. The prototype
-must explicitly document whether it consumes released source data, a compiled
-dictionary dump, or library APIs. It must not depend silently on private binary
-layouts that can change between Sudachi releases.
+Use a small Rust exporter pinned to the selected Sudachi release as the upstream
+adapter. SudachiPy provides exact-surface lookup but no complete lexicon
+iteration, while the Rust lexicon exposes its size and word information by ID.
+The exporter consumes the official compiled dictionary and emits a neutral
+entry stream for the web-format builder. It must pin the exact upstream commit
+and avoid parsing private binary layouts independently.
 
 The manifest should contain at least:
 

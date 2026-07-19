@@ -30,6 +30,10 @@ The target command surface is:
 
 ```text
 npm run data:sample   Generate or copy the deterministic browser fixture
+npm run data:core     Export an installed Core dictionary to a neutral stream
+npm run data:core:web Build locally served Core browser shards
+npm run data:full     Export an installed Full dictionary to a neutral stream
+npm run data:full:web Build locally served Full browser shards
 npm run dev           Start the local HTTP development server
 npm test              Run unit, integrity, and search fixtures
 npm run build         Produce deployable static output
@@ -48,6 +52,26 @@ The sample dataset should include:
 
 The fixture should be small enough to regenerate almost instantly and stable
 enough that UI tests can assert exact ordering.
+
+`npm run data:core` is a separate feasibility/release command. It expects the
+project-local Rust toolchain and the pinned Core installation described in
+[feasibility.md](feasibility.md), and writes ignored artifacts under
+`reports/`. It is intentionally not part of normal frontend checks.
+
+After the neutral export exists, `npm run data:core:web` writes the versioned
+browser dataset under `public/data/releases/`. Those assets are also ignored by
+Git. When that Core manifest is present, the local app selects it automatically;
+otherwise it falls back to the sample fixture. A complete local sequence is:
+
+```sh
+npm run data:core
+npm run data:core:web
+npm run dev
+```
+
+The Full commands use the same exporter and browser-format builder. When both
+generated editions are present locally, the application currently prefers Full;
+it falls back through Core to the sample fixture as assets become unavailable.
 
 Do not use `file://` as a development environment. An HTTP server is required
 to exercise module workers, relative `fetch` calls, MIME types, and realistic

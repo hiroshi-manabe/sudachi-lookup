@@ -2,9 +2,15 @@
 node_modules/
 dist/
 .vite/
+.next/
+.wrangler/
+.venv/
+.tooling/
+target/
+*.tsbuildinfo
 
 # Generated dictionary data and reports
-public/data/
+public/data/releases/
 reports/
 
 # Local environment

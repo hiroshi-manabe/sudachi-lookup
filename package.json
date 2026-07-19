@@ -1,0 +1,41 @@
+{
+  "name": "sudachi-lookup",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext dev",
+    "build": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext build",
+    "preview": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
+    "data:sample": "node tools/dictionary/build-sample.mjs",
+    "data:core": "SUDACHI_EDITION=core node tools/dictionary/export-dictionary.mjs",
+    "data:core:web": "SUDACHI_EDITION=core node tools/dictionary/build-dictionary-web.mjs",
+    "data:full": "SUDACHI_EDITION=full node tools/dictionary/export-dictionary.mjs",
+    "data:full:web": "SUDACHI_EDITION=full node tools/dictionary/build-dictionary-web.mjs",
+    "data:core:validate": "SUDACHI_EDITION=core node tools/dictionary/validate-web.mjs",
+    "data:full:validate": "SUDACHI_EDITION=full node tools/dictionary/validate-web.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "npm run data:sample && npm test && tsc --noEmit && npm run build"
+  },
+  "dependencies": {
+    "next": "16.2.6",
+    "react": "19.2.6",
+    "react-dom": "19.2.6"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "1.37.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@vitejs/plugin-react": "6.0.2",
+    "@vitejs/plugin-rsc": "0.5.26",
+    "react-server-dom-webpack": "19.2.6",
+    "typescript": "5.9.3",
+    "vinext": "0.0.50",
+    "vite": "8.0.13",
+    "wrangler": "4.92.0"
+  },
+  "type": "module"
+}

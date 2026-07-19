@@ -10,8 +10,12 @@ domain. It requires no application server, search API, or hosted database.
 
 ## Project status
 
-This repository currently contains the product and architecture specification.
-Implementation has not started.
+The local vertical slice, complete SudachiDict Core exporter, and first
+range-sharded browser format are implemented. The pinned pipeline enumerates
+all 1,629,080 Core entries, validates every A/B split reference, generates
+8,140,461 lookup aliases, and divides search and record data into bounded binary
+files. The browser automatically uses generated Core assets when they are
+present and otherwise falls back to the deterministic development fixture.
 
 The proposed first release will provide:
 
@@ -65,9 +69,28 @@ Generated dictionary assets should not be edited manually. Each release should
 record the source dictionary edition and version, generator version, data-format
 version, checksums, and applicable notices.
 
+## Run with SudachiDict Core locally
+
+After installing the pinned local data prerequisites described in the
+feasibility notes:
+
+```sh
+npm run data:core
+npm run data:core:web
+npm run dev
+```
+
+For the pinned Full edition, use `npm run data:full` followed by
+`npm run data:full:web`. The same application and Worker consume either
+edition; with both present locally, Full is preferred.
+
+The two generated-data directories are ignored by Git. Normal UI development
+still requires only `npm run dev` and uses the small fixture when Core assets
+are absent.
+
 ## Next milestone
 
-Build a command-line prototype against one pinned SudachiDict Core release and
+Validate the prepared Core build under production-like HTTP compression and
 measure:
 
 - Total compressed output size
@@ -75,7 +98,7 @@ measure:
 - Median and maximum shard size
 - Cold and warm query latency
 - Browser memory use across a representative search session
-- Coverage and integrity of A/B split references
+- Request counts for common one- and two-character prefixes
 
 Those measurements will validate the storage design before work begins on the
 production interface. Everyday browser development should use a small,
@@ -86,6 +109,7 @@ separately rather than rebuilt on every local or preview run.
 
 - [Architecture and product specification](docs/architecture.md)
 - [Development and deployment workflow](docs/development.md)
+- [Initial feasibility findings](docs/feasibility.md)
 
 ## Licensing
 
