@@ -2,9 +2,10 @@
 
 ## Status
 
-Implemented locally in browser data format v3. The Core and Full generators now
-preserve and validate Structure references, and the result interface implements
-the navigation, history, expansion, and accessibility model described here.
+Implemented locally in browser data format v3. Format v4 replaces browser-side
+Structure and A/B word-ID references with eager one-byte boundaries, as defined
+in [Compact Split Boundary Format](split-boundary-format.md). The interaction,
+history, expansion, and accessibility model remains unchanged.
 
 ## Purpose
 
@@ -144,14 +145,18 @@ remain available to assistive technology. Color alone must not encode the unit.
 
 ## Data requirements
 
-The browser dataset must add `word_structure` references to each record. The
-build pipeline should:
+The extraction dataset preserves `word_structure`, A-split, and B-split word-ID
+references. The browser build resolves them to cumulative code-point boundaries
+within the parent surface. The build pipeline should:
 
-- Preserve upstream word IDs for Structure, A splits, and B splits.
+- Preserve upstream word IDs in the extraction report for validation and
+  provenance, but omit them from browser records.
 - Validate that every referenced system word is in range.
-- Load component record shards before rendering interactive surfaces.
-- Retain a safe contextual-surface fallback if a global entry surface is not
-  sufficient for a particular reference.
+- Validate that referenced component lengths form strictly increasing one-byte
+  boundaries covering the parent surface.
+- Store Structure, A, and B boundaries eagerly with the parent record.
+- Reconstruct component labels from the parent surface without loading
+  component record shards.
 - Report Structure entry counts, reference counts, unresolved references, and
   component-count distribution for both Core and Full.
 

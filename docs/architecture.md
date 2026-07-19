@@ -77,15 +77,19 @@ below a configured size ceiling.
 The routing scheme must be prefix-preserving. Hash-sharding the search keys
 would distribute a prefix query across every shard and is therefore unsuitable.
 
-### 4.4 Preserve Sudachi word identities and split references
+### 4.4 Preserve Sudachi word identities and resolve browser split boundaries
 
 Sudachi can contain multiple entries with the same surface. Each extracted
 dictionary record therefore receives an internal stable ID derived from the
 pinned input, while UI-level grouping remains optional.
 
-Sudachi WordInfo exposes A- and B-unit split data. The generator will resolve
-and validate those relationships rather than infer splits from strings. The
-available fields are documented in
+Sudachi WordInfo exposes Structure and A- and B-unit split data. The extraction
+stage preserves those relationships as word IDs for validation. Browser format
+v4 resolves them to compact cumulative code-point boundaries within the parent
+surface, avoiding component-record requests while retaining Sudachi's authored
+segmentation. The encoding and measured invariants are documented in
+[Compact Split Boundary Format](split-boundary-format.md). The available
+upstream fields are documented in
 [SudachiPy WordInfo subsetting](https://worksapplications.github.io/sudachi.rs/python/topics/subsetting.html).
 
 ### 4.5 Use SudachiDict Core first
@@ -115,8 +119,9 @@ interface Entry {
   dictionaryForm: string
   readingForm: string
   posId: number
-  aSplit: EntryId[]
-  bSplit: EntryId[]
+  structureBoundaries: number[]
+  aBoundaries: number[]
+  bBoundaries: number[]
   synonymGroupIds?: number[]
   rankingSignal?: number
 }
@@ -128,11 +133,12 @@ interface SearchAlias {
 }
 ```
 
-`aSplit` and `bSplit` are empty when no further split exists. A split sequence
-may contain entries whose displayed surface depends on the parent context, so
-the generator must test actual upstream behavior before assuming that every
-child surface can always be rendered from a global entry table alone. If
-necessary, a split component can store an entry ID plus a contextual surface.
+Boundary arrays are empty when the corresponding segmentation is absent. Each
+value is a cumulative Unicode code-point offset in the parent surface. The
+offline generator validates the original referenced word IDs and component
+lengths before emitting one-byte browser boundaries. Component labels are
+reconstructed from the parent surface, preserving contextual capitalization and
+orthography without fetching referenced records.
 
 Part-of-speech arrays and other repeated values should use interned IDs. Empty
 or identical forms may be represented as references to `surface` rather than
