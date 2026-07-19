@@ -57,6 +57,7 @@ on HTTP range support. The detailed rationale is in
 app/                  Web application
 tools/dictionary/     Reproducible dictionary build pipeline
 public/data/          Generated, versioned search assets
+.github/workflows/     Data-release and site-deployment automation
 docs/                 Product and architecture documentation
 ```
 
@@ -77,11 +78,14 @@ measure:
 - Coverage and integrity of A/B split references
 
 Those measurements will validate the storage design before work begins on the
-production interface.
+production interface. Everyday browser development should use a small,
+deterministic fixture; Full dictionary assets should be generated and validated
+separately rather than rebuilt on every local or preview run.
 
 ## Documentation
 
 - [Architecture and product specification](docs/architecture.md)
+- [Development and deployment workflow](docs/development.md)
 
 ## Licensing
 

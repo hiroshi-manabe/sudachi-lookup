@@ -308,6 +308,32 @@ The manifest should contain at least:
 }
 ```
 
+### 9.1 Dictionary release artifacts
+
+Dictionary generation and site deployment are separate pipelines. A dictionary
+release pipeline consumes a pinned upstream edition and version, runs all data
+validation, and publishes a content-addressed artifact with its manifest,
+statistics, checksums, and notices. The artifact is reused until either the
+upstream dictionary version or generator version changes.
+
+Ordinary frontend builds must not regenerate SudachiDict. Local development and
+pull-request previews use a small deterministic fixture. Staging and production
+select an already validated Core or Full artifact.
+
+For Full, the preferred production path is CI-owned assembly and deployment:
+
+```text
+Dictionary release workflow
+    SudachiDict Full -> generate -> validate -> publish versioned artifact
+
+Site deployment workflow
+    frontend + selected artifact -> build dist/ -> validate -> Wrangler upload
+```
+
+This keeps the expensive Full build out of both the local feedback loop and
+Cloudflare Pages' build environment. It also produces one inspectable `dist/`
+artifact representing exactly what was deployed.
+
 ## 10. Validation requirements
 
 ### Data integrity
@@ -343,10 +369,53 @@ The prototype should report rather than guess:
 
 Concrete release budgets should be established after the first Core build.
 
-## 11. Cloudflare Pages deployment
+## 11. Local development and Cloudflare Pages deployment
+
+### 11.1 Local workflow
+
+Use a local HTTP development server from the first browser prototype. Opening
+the application through `file://` is not a supported workflow because module
+workers, `fetch`, MIME handling, and caching need realistic HTTP behavior.
+
+The intended commands are conceptually:
+
+```text
+npm run data:sample   Generate the small deterministic fixture
+npm run dev           Run the local development server
+npm test              Run data and search tests
+npm run build         Build static production output
+npm run preview       Serve the production output locally
+```
+
+Full dictionary generation is an explicit release operation, not a prerequisite
+for `npm run dev`.
+
+### 11.2 Pages project timing
+
+Create the Cloudflare Pages project after the first vertical slice works: a
+production frontend build must load sample shards through the worker, return
+real results, and expand at least one A/B/C entry. Creating Pages at that point
+tests real compression, caching, MIME types, file limits, and network latency
+without making hosting setup block the data prototype.
+
+Use `pages.dev` deployment and branch-preview URLs during development. Connect
+the production custom domain only after the complete release candidate passes
+data integrity, licensing, caching, accessibility, and mobile-performance
+checks. An optional staging subdomain may point at a stable preview branch.
+
+### 11.3 Production delivery
 
 The production site consists only of static application files and dictionary
 assets. Pages Functions, D1, KV, and R2 are unnecessary for the initial design.
+
+For the Full edition, CI owns the production build. It retrieves the validated
+dictionary artifact, builds the frontend, assembles and tests the complete
+`dist/` directory, and uploads it to Pages with Wrangler. Pages is the static
+host rather than the place where the expensive dictionary build occurs.
+
+Core prototypes may initially use a Pages-native Git build that downloads a
+prepared dictionary artifact if measurements show that this remains quick and
+reliable. The Full workflow should not depend on that convenience path.
 
 Versioned and content-hashed data files can use:
 
@@ -402,6 +471,8 @@ owner explicitly chooses one.
 | New dictionary deployment mixes old and new assets | Content-hashed immutable files and one version-selecting manifest |
 | Upstream extraction API changes | Isolate extraction behind a tested adapter and pin tool versions |
 | Licensing notices are incomplete | Package notices from the exact pinned release and review before publish |
+| Full builds slow ordinary development | Use a checked-in sample fixture and publish Full as a reusable CI artifact |
+| Deployment cannot be reproduced | Retain the validated dictionary artifact and exact assembled `dist/` metadata |
 
 ## 14. Delivery roadmap
 
@@ -415,21 +486,37 @@ owner explicitly chooses one.
 
 ### Phase 2: functional browser prototype
 
+- Add the local development server and deterministic sample-data command.
 - Implement the worker protocol and shard cache.
 - Add incremental search and deterministic ranking.
 - Render entry metadata and A/B/C segmentation.
 - Test IME, keyboard, mobile, and accessibility behavior.
 
-### Phase 3: production static site
+### Phase 3: hosted preview
+
+- Push the repository to its Git host.
+- Create the Cloudflare Pages project after the vertical slice works locally.
+- Exercise sample-data builds through `pages.dev` and branch previews.
+- Verify binary MIME types, headers, compression, and cache invalidation.
+
+### Phase 4: production Core site
 
 - Finalize the interface and responsive presentation.
 - Add dictionary version and notices pages.
-- Configure immutable asset headers and deployment previews.
+- Publish and consume a validated Core dictionary artifact.
+- Configure immutable asset headers and production deployment automation.
 - Deploy to Cloudflare Pages and connect the custom domain.
 
-### Phase 4: optional expansion
+### Phase 5: Full edition
 
-- Add Small and Full editions.
+- Generate and measure a pinned Full release.
+- Add the CI-owned Full artifact and site-deployment workflows.
+- Assemble, validate, and upload the complete static output with Wrangler.
+- Confirm that Pages file-count and per-asset limits retain adequate margin.
+
+### Phase 6: optional expansion
+
+- Add the Small edition.
 - Offer an explicit offline/full-data download.
 - Evaluate substring or fuzzy search from observed demand.
 - Evaluate arbitrary-text tokenization independently from lexicon lookup.
@@ -445,7 +532,8 @@ These should be answered by the feasibility prototype or product testing:
 - Should short-prefix suggestions be global or separated by alias kind?
 - Does contextual surface text need to accompany split entry references?
 - Should result grouping default to linguistic entries or visible headwords?
-- Is an optional locally installed Full edition worth supporting?
+- Should Full replace Core in production or be offered as a selectable edition?
+- Where should validated dictionary artifacts be retained and for how long?
 
 The architecture is considered validated when the Core prototype meets agreed
 transfer, latency, memory, integrity, and search-quality budgets without a
