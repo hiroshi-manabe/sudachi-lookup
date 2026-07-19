@@ -95,7 +95,7 @@ behavior without beginning with the largest edition. Small and Full can later
 be generated from the same pipeline and offered as deployment choices or
 optional data packs.
 
-The subsequent Full feasibility run showed that the same v2 pipeline produces
+The subsequent Full feasibility run showed that the same v3 pipeline produces
 4,293 Full dictionary files and keeps every file below 1 MiB raw. Core and Full
 together remain below the Cloudflare Pages Free-plan file allowance. Pages is
 therefore the default host for both editions; object storage is a contingency,

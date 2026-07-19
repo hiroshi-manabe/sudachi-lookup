@@ -81,7 +81,7 @@ an Apple Silicon development machine:
 | Entries with B splits | 511,955 |
 | B split references | 1,397,649 |
 | Invalid, out-of-range, or non-system split references | 0 |
-| Compressed neutral export | 40,657,803 bytes (38.8 MiB) |
+| Compressed neutral export, including Structure | 43,837,313 bytes (41.8 MiB) |
 | Export time, excluding compilation | 55.5 seconds |
 | Maximum resident set size | 249,102,336 bytes (237.6 MiB) |
 
@@ -112,17 +112,17 @@ report directory name when testing another installed dictionary.
 ## Next acceptance point
 
 Enumeration, relationship validation, and the first web-format build are
-complete. The v2 prototype generated 8,140,461 de-duplicated surface,
+complete. The v3 prototype generated 8,140,461 de-duplicated surface,
 dictionary, normalized, katakana-reading, and hiragana-reading aliases.
 
 | Browser artifact | Count | Median raw size | p95 raw size | Maximum raw size | Total raw size |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Search shards | 1,629 | 131,315 B | 247,187 B | 400,838 B | 236,221,915 B |
-| Record shards | 796 | 273,821 B | 479,497 B | 660,987 B | 243,470,733 B |
+| Record shards | 796 | 284,923 B | 504,208 B | 694,203 B | 252,802,733 B |
 
 The bootstrap index contains 15,296 aliases and is 303,834 bytes raw. The
 manifest is 292,806 bytes raw. The complete generated directory is about
-463 MiB before HTTP compression, but it is not downloaded as a unit: normal
+472 MiB before HTTP compression, but it is not downloaded as a unit: normal
 queries fetch only overlapping sorted-key ranges and the record ranges for the
 visible results and their split components.
 
@@ -145,7 +145,7 @@ Before publishing these artifacts, the release pipeline must still measure:
 - Browser memory during a representative query session
 - Cache behavior and total request count for short prefixes
 
-The current v2 format deliberately favors a simple, testable encoding. String
+The current v3 format deliberately favors a simple, testable encoding. String
 and POS interning should be evaluated only if hosted transfer or browser-memory
 measurements show that the additional decoder complexity is worthwhile.
 
@@ -163,20 +163,27 @@ Full-specific extraction or browser-format code was required.
 | Search shards | 1,629 | 2,883 | 1.77× |
 | Record shards | 796 | 1,408 | 1.77× |
 | Dictionary files including manifest/bootstrap | 2,427 | 4,293 | 1.77× |
-| Raw browser directory | about 463 MiB | about 860 MiB | 1.86× |
-| Neutral gzip export | 40,657,803 B | 83,165,332 B | 2.05× |
+| Raw browser directory | about 472 MiB | about 879 MiB | 1.86× |
+| Neutral gzip export | 43,837,313 B | 90,136,869 B | 2.06× |
 | Export time | about 52–56 s | about 96 s | about 1.8× |
-| Web-format build time | 7.8 s | 14.9 s | 1.91× |
+| Web-format build time | 11.1 s | 20.7 s | 1.86× |
 
 Full preserved the same useful size bounds:
 
 | Full browser artifact | Count | Median raw size | p95 raw size | Maximum raw size | Total raw size |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Search shards | 2,883 | 149,219 B | 222,773 B | 401,114 B | 440,371,526 B |
-| Record shards | 1,408 | 302,648 B | 456,682 B | 660,987 B | 451,979,997 B |
+| Record shards | 1,408 | 319,925 B | 481,872 B | 694,203 B | 471,957,614 B |
 
 The Full manifest is 524,587 bytes raw and its bootstrap index is 414,504
 bytes raw. All 8,887,201 A/B split references resolved to valid system entries.
+
+Format v3 additionally preserves dictionary Structure. Core contains 832,336
+entries with 1,925,730 Structure references; Full contains 1,747,019 entries
+with 4,273,610 references. Neither edition has an invalid Structure reference.
+Most Structure sequences contain two or three components, but both editions
+contain a maximum of 88, confirming that the interface must wrap arbitrary
+component counts rather than assume a binary split.
 
 ### Hosting conclusion
 

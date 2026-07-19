@@ -2,7 +2,7 @@ use flate2::{write::GzEncoder, Compression};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     env,
     error::Error,
     fs::{self, File},
@@ -12,7 +12,7 @@ use std::{
 };
 use sudachi::dic::{subset::InfoSubset, DictionaryLoader};
 
-const EXPORT_FORMAT_VERSION: u32 = 1;
+const EXPORT_FORMAT_VERSION: u32 = 2;
 const SUDACHI_REVISION: &str = "90fd6068c80c2fc3b63e0dbab0e341475bad4d8f";
 
 #[derive(Serialize)]
@@ -28,6 +28,7 @@ struct ExportEntry<'a> {
     cost: i16,
     a_split: Vec<u32>,
     b_split: Vec<u32>,
+    word_structure: Vec<u32>,
     synonym_group_ids: &'a [u32],
 }
 
@@ -37,6 +38,8 @@ struct SplitMetrics {
     references: u64,
     non_system_references: u64,
     out_of_range_references: u64,
+    maximum_components: u64,
+    component_count_distribution: BTreeMap<usize, u64>,
 }
 
 #[derive(Serialize)]
@@ -65,6 +68,7 @@ struct ExportReport {
     maximum_homographs_for_one_surface: u64,
     a_split: SplitMetrics,
     b_split: SplitMetrics,
+    word_structure: SplitMetrics,
     aliases: AliasMetrics,
 }
 
@@ -79,6 +83,11 @@ fn split_ids(
 ) -> Vec<u32> {
     if !split.is_empty() {
         metrics.entries += 1;
+        metrics.maximum_components = metrics.maximum_components.max(split.len() as u64);
+        *metrics
+            .component_count_distribution
+            .entry(split.len())
+            .or_insert(0) += 1;
     }
     metrics.references += split.len() as u64;
 
@@ -134,6 +143,7 @@ fn run(input: &Path, output: &Path, report_path: &Path) -> Result<(), Box<dyn Er
     let mut surface_counts: HashMap<String, u32> = HashMap::new();
     let mut a_split = SplitMetrics::default();
     let mut b_split = SplitMetrics::default();
+    let mut word_structure = SplitMetrics::default();
     let mut reading_form_different = 0_u64;
     let mut normalized_form_different = 0_u64;
     let mut dictionary_form_different = 0_u64;
@@ -161,6 +171,7 @@ fn run(input: &Path, output: &Path, report_path: &Path) -> Result<(), Box<dyn Er
             cost,
             a_split: split_ids(info.a_unit_split(), lexicon_size, &mut a_split),
             b_split: split_ids(info.b_unit_split(), lexicon_size, &mut b_split),
+            word_structure: split_ids(info.word_structure(), lexicon_size, &mut word_structure),
             synonym_group_ids: info.synonym_group_ids(),
         };
 
@@ -198,6 +209,7 @@ fn run(input: &Path, output: &Path, report_path: &Path) -> Result<(), Box<dyn Er
         maximum_homographs_for_one_surface,
         a_split,
         b_split,
+        word_structure,
         aliases: AliasMetrics {
             surface: u64::from(lexicon_size),
             reading_form_different,
@@ -253,6 +265,8 @@ mod tests {
         assert_eq!(metrics.references, 3);
         assert_eq!(metrics.out_of_range_references, 1);
         assert_eq!(metrics.non_system_references, 1);
+        assert_eq!(metrics.maximum_components, 3);
+        assert_eq!(metrics.component_count_distribution.get(&3), Some(&1));
     }
 
     #[test]

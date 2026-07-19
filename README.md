@@ -10,19 +10,18 @@ domain. It requires no application server, search API, or hosted database.
 
 ## Project status
 
-The local vertical slice, complete SudachiDict Core exporter, and first
-range-sharded browser format are implemented. The pinned pipeline enumerates
-all 1,629,080 Core entries, validates every A/B split reference, generates
-8,140,461 lookup aliases, and divides search and record data into bounded binary
-files. The browser automatically uses generated Core assets when they are
-present and otherwise falls back to the deterministic development fixture.
+The local vertical slice, complete SudachiDict Core/Full exporter, and first
+range-sharded browser format are implemented. Format v3 preserves Structure and
+A/B relationships, and the interface supports navigable compound components,
+mode badges, and mode-specific expansion. The browser prefers generated Full or
+Core assets when present and otherwise falls back to the deterministic fixture.
 
 The proposed first release will provide:
 
 - Prefix search over surface, dictionary, normalized, and reading forms
 - Hiragana and katakana query matching
 - Responsive, incremental results driven by a Web Worker
-- Expandable A/B/C segmentation for dictionary entries
+- Navigable Structure components and expandable A/B/C segmentation
 - A versioned, reproducible SudachiDict Core data build
 - A fully static Cloudflare Pages deployment
 
@@ -40,7 +39,7 @@ Offline extractor and index builder
         |
         +-- manifest and bootstrap suggestions
         +-- prefix-search shards
-        +-- entry-detail shards with A/B split references
+        +-- entry-detail shards with Structure and A/B references
         |
         v
 Cloudflare Pages
@@ -110,6 +109,7 @@ separately rather than rebuilt on every local or preview run.
 - [Architecture and product specification](docs/architecture.md)
 - [Development and deployment workflow](docs/development.md)
 - [Initial feasibility findings](docs/feasibility.md)
+- [Compound navigation interaction](docs/compound-navigation.md)
 
 ## Licensing
 

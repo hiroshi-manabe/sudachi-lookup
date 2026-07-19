@@ -204,16 +204,15 @@ button {
   transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
 }
 
+.result-card[data-expandable="true"] {
+  cursor: pointer;
+}
+
 .result-card:hover,
 .result-card[data-active="true"] {
   border-color: rgba(35, 91, 71, 0.55);
   background: var(--paper-strong);
   transform: translateY(-1px);
-}
-
-.result-card:focus-visible {
-  outline: 3px solid rgba(217, 242, 79, 0.8);
-  outline-offset: 2px;
 }
 
 .result-main {
@@ -224,12 +223,26 @@ button {
   padding: 20px 22px;
 }
 
-.surface {
-  display: block;
+.entry-identity {
+  min-width: 0;
+}
+
+.entry-heading {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.entry-heading .segments {
   font-family: "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif;
   font-size: clamp(24px, 3vw, 34px);
   font-weight: 580;
   letter-spacing: -0.035em;
+  line-height: 1.25;
+}
+
+.surface {
+  display: inline;
 }
 
 .reading,
@@ -255,7 +268,8 @@ button {
   color: #89928c;
 }
 
-.expand-hint {
+.expand-hint,
+.expand-control {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -263,6 +277,19 @@ button {
   font-size: 12px;
   font-weight: 720;
   white-space: nowrap;
+}
+
+.expand-control {
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: transparent;
+}
+
+.expand-control:focus-visible,
+.component-link:focus-visible {
+  outline: 3px solid rgba(217, 242, 79, 0.8);
+  outline-offset: 3px;
 }
 
 .expand-symbol {
@@ -275,7 +302,7 @@ button {
   transition: transform 160ms ease;
 }
 
-.result-card[aria-expanded="true"] .expand-symbol {
+.result-card[data-expanded="true"] .expand-symbol {
   transform: rotate(45deg);
 }
 
@@ -312,6 +339,34 @@ button {
   align-items: center;
   font-family: "Hiragino Mincho ProN", "Yu Mincho", Georgia, serif;
   font-size: 18px;
+}
+
+.segment-item {
+  display: inline-flex;
+  gap: 7px;
+  align-items: baseline;
+}
+
+.component-link {
+  padding: 1px 2px 2px;
+  border: 0;
+  border-bottom: 1px solid rgba(35, 91, 71, 0.3);
+  border-radius: 2px;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.component-link:hover {
+  border-color: var(--leaf);
+  color: var(--leaf);
+  background: var(--leaf-light);
 }
 
 .separator {

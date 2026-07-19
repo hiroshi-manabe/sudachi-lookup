@@ -13,7 +13,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 2;
+const FORMAT_VERSION: u16 = 3;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const BOOTSTRAP_PER_FIRST_CHARACTER: usize = 64;
@@ -29,6 +29,7 @@ struct SourceEntry {
     cost: i16,
     a_split: Vec<u32>,
     b_split: Vec<u32>,
+    word_structure: Vec<u32>,
 }
 
 #[derive(Clone)]
@@ -195,6 +196,7 @@ fn write_record(writer: &mut BinaryWriter, entry: &SourceEntry) -> Result<(), Bo
     writer.string(&entry.pos.join(" · "))?;
     writer.ids(&entry.a_split)?;
     writer.ids(&entry.b_split)?;
+    writer.ids(&entry.word_structure)?;
     Ok(())
 }
 

@@ -2,9 +2,9 @@
 
 ## Status
 
-This document records the proposed interaction model for navigating Sudachi
-dictionary entries through their structural components and A/B/C split units.
-It is a product specification only; the behavior is not implemented yet.
+Implemented locally in browser data format v3. The Core and Full generators now
+preserve and validate Structure references, and the result interface implements
+the navigation, history, expansion, and accessibility model described here.
 
 ## Purpose
 
@@ -176,3 +176,7 @@ The interaction is complete when automated and browser tests demonstrate that:
 - Homographs remain visible after searching a component surface.
 - Keyboard and screen-reader users can distinguish navigation from expansion.
 - Long component sequences wrap without horizontal overflow on mobile screens.
+
+The normal TypeScript, application build, sample-format tests, Rust tests, and
+generated Core/Full structural validation must pass before this feature is
+published.

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { LookupResult, WorkerResponse } from "./lookup-types";
+import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
 
 const INITIAL_QUERY = "選挙";
 
@@ -10,6 +10,7 @@ export function LookupApp() {
   const requestIdRef = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
+  const queryRef = useRef(INITIAL_QUERY);
   const [query, setQuery] = useState(INITIAL_QUERY);
   const [results, setResults] = useState<LookupResult[]>([]);
   const [status, setStatus] = useState("Loading local dictionary…");
@@ -18,6 +19,10 @@ export function LookupApp() {
   const [expandedId, setExpandedId] = useState<number | null>(null);
 
   useEffect(() => {
+    const initialQuery = queryFromLocation();
+    queryRef.current = initialQuery;
+    setQuery(initialQuery);
+
     const worker = new Worker(new URL("./search.worker.ts", import.meta.url), {
       type: "module",
     });
@@ -28,7 +33,7 @@ export function LookupApp() {
       if (message.type === "ready") {
         setDataset(message.dataset);
         setStatus(`${message.entries} entries · ${message.aliases} searchable forms`);
-        search(INITIAL_QUERY, worker);
+        search(queryRef.current, worker);
       } else if (message.type === "results") {
         if (message.requestId !== requestIdRef.current) return;
         setResults(message.results);
@@ -39,8 +44,19 @@ export function LookupApp() {
       }
     };
 
+    const onPopState = () => {
+      const nextQuery = queryFromLocation();
+      queryRef.current = nextQuery;
+      setQuery(nextQuery);
+      search(nextQuery, worker);
+    };
+
+    window.addEventListener("popstate", onPopState);
     worker.postMessage({ type: "init" });
-    return () => worker.terminate();
+    return () => {
+      window.removeEventListener("popstate", onPopState);
+      worker.terminate();
+    };
   }, []);
 
   useEffect(() => {
@@ -62,8 +78,25 @@ export function LookupApp() {
   }
 
   function updateQuery(nextQuery: string) {
+    queryRef.current = nextQuery;
     setQuery(nextQuery);
-    if (!composingRef.current) search(nextQuery);
+    if (composingRef.current) return;
+    updateQueryUrl(nextQuery, "replace");
+    search(nextQuery);
+  }
+
+  function navigateToComponent(nextQuery: string) {
+    queryRef.current = nextQuery;
+    setQuery(nextQuery);
+    setExpandedId(null);
+    updateQueryUrl(nextQuery, "push");
+    search(nextQuery);
+    inputRef.current?.focus();
+  }
+
+  function toggleResult(result: LookupResult) {
+    if (!result.splits) return;
+    setExpandedId((id) => (id === result.id ? null : result.id));
   }
 
   function handleInputKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
@@ -75,8 +108,7 @@ export function LookupApp() {
       setActiveIndex((index) => Math.max(index - 1, 0));
     } else if (event.key === "Enter" && results[activeIndex]?.splits) {
       event.preventDefault();
-      const result = results[activeIndex];
-      setExpandedId((id) => (id === result.id ? null : result.id));
+      toggleResult(results[activeIndex]);
     }
   }
 
@@ -113,7 +145,6 @@ export function LookupApp() {
             }}
             onKeyDown={handleInputKeyDown}
             aria-controls="lookup-results"
-            aria-activedescendant={results[activeIndex] ? `result-${results[activeIndex].id}` : undefined}
           />
           <kbd className="shortcut">⌘ K</kbd>
         </div>
@@ -131,44 +162,62 @@ export function LookupApp() {
           </span>
         </div>
 
-        <div className="results" id="lookup-results" role="listbox">
+        <div className="results" id="lookup-results" role="list">
           {results.map((result, index) => {
             const expanded = expandedId === result.id;
+            const panelId = `split-${result.id}`;
             return (
-              <button
-                type="button"
+              <article
                 className="result-card"
                 id={`result-${result.id}`}
                 key={result.id}
-                role="option"
-                aria-selected={index === activeIndex}
-                aria-expanded={result.splits ? expanded : undefined}
+                role="listitem"
                 data-active={index === activeIndex}
+                data-expandable={Boolean(result.splits)}
+                data-expanded={expanded}
                 onMouseEnter={() => setActiveIndex(index)}
-                onClick={() => result.splits && setExpandedId(expanded ? null : result.id)}
+                onClick={() => toggleResult(result)}
               >
-                <span className="result-main">
-                  <span>
-                    <span className="surface" lang="ja">{result.surface}</span>
+                <div className="result-main">
+                  <div className="entry-identity">
+                    <div className="entry-heading" lang="ja">
+                      <UnitBadge mode={result.unit} />
+                      <ComponentSequence
+                        segments={result.structure}
+                        interactive={result.unit !== "A"}
+                        onNavigate={navigateToComponent}
+                      />
+                    </div>
                     <span className="reading" lang="ja">{result.readingForm}</span>
-                  </span>
-                  <span className="details">
+                  </div>
+                  <div className="details">
                     <span className="form-line"><span className="form-label">Part of speech</span>{result.pos}</span>
                     <span className="form-line"><span className="form-label">Normalized</span>{result.normalizedForm}</span>
-                  </span>
+                  </div>
                   {result.splits ? (
-                    <span className="expand-hint">
-                      Split modes <span className="expand-symbol" aria-hidden="true">+</span>
-                    </span>
-                  ) : <span className="expand-hint">Single unit</span>}
-                </span>
-                {expanded && result.splits ? <SplitPanel result={result} /> : null}
-              </button>
+                    <button
+                      type="button"
+                      className="expand-control"
+                      aria-expanded={expanded}
+                      aria-controls={panelId}
+                      aria-label={`${expanded ? "Hide" : "Show"} split modes for ${result.surface}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleResult(result);
+                      }}
+                    >
+                      <span>Split modes</span>
+                      <span className="expand-symbol" aria-hidden="true">+</span>
+                    </button>
+                  ) : <span className="expand-hint">A unit</span>}
+                </div>
+                {expanded && result.splits ? (
+                  <SplitPanel id={panelId} result={result} onNavigate={navigateToComponent} />
+                ) : null}
+              </article>
             );
           })}
-          {!results.length ? (
-            <div className="empty">No prefix matches.</div>
-          ) : null}
+          {!results.length ? <div className="empty">No prefix matches.</div> : null}
         </div>
       </section>
 
@@ -184,29 +233,87 @@ export function LookupApp() {
   );
 }
 
-function SplitPanel({ result }: { result: LookupResult }) {
+function SplitPanel({
+  id,
+  result,
+  onNavigate,
+}: {
+  id: string;
+  result: LookupResult;
+  onNavigate: (query: string) => void;
+}) {
   if (!result.splits) return null;
   return (
-    <span className="split-panel">
-      <SplitRow mode="C" segments={result.splits.c} />
-      <SplitRow mode="B" segments={result.splits.b} />
-      <SplitRow mode="A" segments={result.splits.a} />
+    <div className="split-panel" id={id}>
+      {result.unit === "C" && result.splits.b ? (
+        <SplitRow mode="B" segments={result.splits.b} onNavigate={onNavigate} />
+      ) : null}
+      <SplitRow mode="A" segments={result.splits.a} onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function SplitRow({
+  mode,
+  segments,
+  onNavigate,
+}: {
+  mode: UnitMode;
+  segments: string[];
+  onNavigate: (query: string) => void;
+}) {
+  return (
+    <div className="split-row">
+      <UnitBadge mode={mode} />
+      <ComponentSequence segments={segments} interactive onNavigate={onNavigate} />
+    </div>
+  );
+}
+
+function UnitBadge({ mode }: { mode: UnitMode }) {
+  return <span className="mode" aria-label={`${mode} unit`}>{mode}</span>;
+}
+
+function ComponentSequence({
+  segments,
+  interactive,
+  onNavigate,
+}: {
+  segments: string[];
+  interactive: boolean;
+  onNavigate: (query: string) => void;
+}) {
+  return (
+    <span className="segments">
+      {segments.map((segment, index) => (
+        <span className="segment-item" key={`${segment}-${index}`}>
+          {index > 0 ? <span className="separator" aria-hidden="true">/</span> : null}
+          {interactive ? (
+            <button
+              type="button"
+              className="component-link"
+              aria-label={`Search for ${segment}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onNavigate(segment);
+              }}
+            >
+              {segment}
+            </button>
+          ) : <span className="surface">{segment}</span>}
+        </span>
+      ))}
     </span>
   );
 }
 
-function SplitRow({ mode, segments }: { mode: string; segments: string[] }) {
-  return (
-    <span className="split-row">
-      <span className="mode">{mode}</span>
-      <span className="segments" lang="ja">
-        {segments.map((segment, index) => (
-          <span key={`${segment}-${index}`}>
-            {index > 0 ? <span className="separator"> / </span> : null}
-            {segment}
-          </span>
-        ))}
-      </span>
-    </span>
-  );
+function queryFromLocation() {
+  return new URL(window.location.href).searchParams.get("q") || INITIAL_QUERY;
+}
+
+function updateQueryUrl(query: string, mode: "push" | "replace") {
+  const url = new URL(window.location.href);
+  if (query) url.searchParams.set("q", query);
+  else url.searchParams.delete("q");
+  window.history[`${mode}State`]({ query }, "", url);
 }

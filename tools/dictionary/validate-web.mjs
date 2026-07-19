@@ -6,11 +6,11 @@ const root = resolve(import.meta.dirname, "../..");
 const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v2`;
+const dataset = `${release}-v3`;
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 2) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== 3) throw new Error("Unexpected web format version");
 if (manifest.dataset !== dataset) throw new Error("Manifest dataset does not match directory");
 if (manifest.records.files.length !== Math.ceil(manifest.entries / manifest.records.span)) {
   throw new Error("Record shard count does not cover every entry");
@@ -22,7 +22,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 2 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== 3 || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -33,7 +33,7 @@ if (aliasCount !== manifest.aliases) throw new Error("Search shards do not conta
 let entryCount = 0;
 for (const file of manifest.records.files) {
   const header = await readHeader(resolve(directory, file));
-  if (header.magic !== "SDRE" || header.version !== 2) {
+  if (header.magic !== "SDRE" || header.version !== 3) {
     throw new Error(`Invalid record shard header: ${file}`);
   }
   entryCount += header.count;

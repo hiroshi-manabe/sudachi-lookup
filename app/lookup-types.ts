@@ -1,8 +1,9 @@
 export type SplitView = {
   a: string[];
-  b: string[];
-  c: string[];
+  b?: string[];
 };
+
+export type UnitMode = "A" | "B" | "C";
 
 export type LookupResult = {
   id: number;
@@ -11,6 +12,8 @@ export type LookupResult = {
   normalizedForm: string;
   dictionaryForm: string;
   pos: string;
+  unit: UnitMode;
+  structure: string[];
   splits: SplitView | null;
 };
 

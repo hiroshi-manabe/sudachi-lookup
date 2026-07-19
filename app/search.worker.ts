@@ -2,10 +2,11 @@
 
 import type { LookupResult } from "./lookup-types";
 
-type Entry = Omit<LookupResult, "splits"> & {
+type Entry = Omit<LookupResult, "splits" | "unit" | "structure"> & {
   cost: number;
   aSplit: number[];
   bSplit: number[];
+  wordStructure: number[];
 };
 
 type Alias = {
@@ -25,7 +26,7 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 2;
+  formatVersion: 3;
   dataset: string;
   entries: number;
   aliases: number;
@@ -37,8 +38,8 @@ type DictionaryManifest = {
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v2",
-  "/data/releases/core-20260428-v2",
+  "/data/releases/full-20260428-v3",
+  "/data/releases/core-20260428-v3",
 ];
 const MAX_FULL_ALIASES_FOR_SHORT_QUERY = 10_000;
 const MAX_RESULTS = 20;
@@ -96,14 +97,14 @@ async function loadData() {
     const response = await fetch(`${base}/manifest.json`);
     if (!response.ok) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
-    if (dictionaryManifest.formatVersion !== 2) {
+    if (dictionaryManifest.formatVersion !== 3) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
     }
     dictionaryBase = base;
     mode = "sharded";
     const bootstrapResponse = await fetch(`${base}/${dictionaryManifest.bootstrapFile}`);
     if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    bootstrapAliases = decodeAliases(await bootstrapResponse.arrayBuffer(), 2);
+    bootstrapAliases = decodeAliases(await bootstrapResponse.arrayBuffer(), 3);
     return;
   }
 
@@ -153,7 +154,7 @@ async function searchSharded(rawQuery: string): Promise<LookupResult[]> {
   await loadRecordIds(selectedIds);
   const splitIds = selectedIds.flatMap((id) => {
     const entry = entries.get(id);
-    return entry ? [...entry.aSplit, ...entry.bSplit] : [];
+    return entry ? [...entry.aSplit, ...entry.bSplit, ...entry.wordStructure] : [];
   });
   await loadRecordIds(splitIds);
   return selectedIds.map((id) => toResult(entries.get(id)!)).filter(Boolean);
@@ -171,7 +172,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 2);
+      return decodeAliases(await response.arrayBuffer(), 3);
     });
     searchCache.set(file, promise);
   }
@@ -188,7 +189,7 @@ async function loadRecordIds(ids: number[]) {
       if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
       promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
         if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 2)) {
+        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 3)) {
           entries.set(id, entry);
         }
       });
@@ -241,6 +242,7 @@ function searchSample(rawQuery: string): LookupResult[] {
 }
 
 function toResult(entry: Entry): LookupResult {
+  const unit = entry.bSplit.length ? "C" : entry.aSplit.length ? "B" : "A";
   return {
     id: entry.id,
     surface: entry.surface,
@@ -248,13 +250,18 @@ function toResult(entry: Entry): LookupResult {
     normalizedForm: entry.normalizedForm,
     dictionaryForm: entry.dictionaryForm,
     pos: entry.pos,
-    splits: entry.aSplit.length || entry.bSplit.length
+    unit,
+    structure: unit === "A"
+      ? [entry.surface]
+      : resolveSplit(entry.wordStructure, entry.surface),
+    splits: unit === "C"
       ? {
-          a: resolveSplit(entry.aSplit, entry.surface),
           b: resolveSplit(entry.bSplit, entry.surface),
-          c: [entry.surface],
+          a: resolveSplit(entry.aSplit, entry.surface),
         }
-      : null,
+      : unit === "B"
+        ? { a: resolveSplit(entry.aSplit, entry.surface) }
+        : null,
   };
 }
 
@@ -302,7 +309,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 1 | 2) {
+function decodeEntries(buffer: ArrayBuffer, version: 1 | 3) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 1 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -318,15 +325,19 @@ function decodeEntries(buffer: ArrayBuffer, version: 1 | 2) {
     const pos = reader.string();
     const aSplit = reader.ids();
     const bSplit = reader.ids();
+    const wordStructure = version === 1
+      ? (bSplit.length ? bSplit : aSplit)
+      : reader.ids();
     decoded.set(id, {
-      id, cost, surface, readingForm, normalizedForm, dictionaryForm, pos, aSplit, bSplit,
+      id, cost, surface, readingForm, normalizedForm, dictionaryForm, pos,
+      aSplit, bSplit, wordStructure,
     });
   }
   reader.done();
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 1 | 2) {
+function decodeAliases(buffer: ArrayBuffer, version: 1 | 3) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 1 ? "SDIX" : "SDSH");
   reader.version(version);
