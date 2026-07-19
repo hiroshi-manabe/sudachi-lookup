@@ -232,7 +232,9 @@ export function LookupApp() {
                       <UnitBadge mode={result.unit} />
                       <ComponentSequence
                         segments={result.structure}
-                        interactive={result.unit !== "A"}
+                        interactive={
+                          result.unit !== "A" || shouldNavigateToSurface(query, result.surface)
+                        }
                         onNavigate={navigateToComponent}
                       />
                     </div>
@@ -386,4 +388,12 @@ function updateQueryUrl(query: string, mode: "push" | "replace") {
   if (query) url.searchParams.set("q", query);
   else url.searchParams.delete("q");
   window.history[`${mode}State`]({ query }, "", url);
+}
+
+function shouldNavigateToSurface(query: string, surface: string) {
+  return normalizeNavigationText(query) !== normalizeNavigationText(surface);
+}
+
+function normalizeNavigationText(value: string) {
+  return value.normalize("NFKC").toLocaleLowerCase("ja-JP").trim();
 }

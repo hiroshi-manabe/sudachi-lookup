@@ -35,7 +35,14 @@ from the split metadata. The interface must not infer it from the surface text.
 ### A entries
 
 An A entry is already the shortest unit. Its surface is presented directly and
-is not decomposed in the collapsed heading.
+is not decomposed in the collapsed heading. The whole surface becomes a lookup
+action when it differs from the current normalized query. This allows a broad
+query such as `権` to navigate to an A result such as `権利`, while an exact
+`権` result remains plain text because repeating the same query has no effect.
+
+The comparison uses NFKC normalization, Japanese-locale lowercasing, and
+trimming. Kana and kanji are not treated as equivalent, so a reading query such
+as `けん` can still navigate to the displayed surface `権`.
 
 ```text
 [A]  選挙
@@ -167,6 +174,8 @@ The interaction is complete when automated and browser tests demonstrate that:
 
 - A, B, and C entries receive the correct badges.
 - A entries are not offered meaningless split expansion.
+- An A surface can initiate a lookup when it differs from the current normalized
+  query, while an exact self-match remains plain text.
 - B entries expand to A only.
 - C entries expand to B and A only.
 - B and C collapsed headings use Structure components when available.
