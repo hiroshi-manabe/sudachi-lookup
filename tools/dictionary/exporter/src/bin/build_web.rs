@@ -1,4 +1,5 @@
 use flate2::read::GzDecoder;
+use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
@@ -13,13 +14,15 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 6;
+const FORMAT_VERSION: u16 = 7;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const INITIAL_RESULTS: usize = 20;
-const BOOTSTRAP_BUDGET_BYTES: usize = 1024 * 1024;
+const BOOTSTRAP_BUDGET_BYTES: usize = 4 * 1024 * 1024;
 const BOOTSTRAP_MIN_SEARCH_BYTES: u64 = 192 * 1024;
-const BOOTSTRAP_MIN_MATCHING_ALIASES: usize = 500;
+const BOOTSTRAP_MIN_BROAD_ALIASES: usize = 500;
+const BOOTSTRAP_MIN_DESCENT_ALIASES: usize = 100;
+const BOOTSTRAP_MIN_RECORD_BYTES: u64 = 1024 * 1024;
 
 #[derive(Deserialize)]
 struct SourceEntry {
@@ -117,9 +120,13 @@ struct Manifest {
     bootstrap_records: usize,
     bootstrap_candidate_prefixes: usize,
     bootstrap_bytes: u64,
+    bootstrap_decoded_bytes: u64,
     bootstrap_budget_bytes: usize,
+    bootstrap_compression: &'static str,
     bootstrap_min_search_bytes: u64,
-    bootstrap_min_matching_aliases: usize,
+    bootstrap_min_broad_aliases: usize,
+    bootstrap_min_descent_aliases: usize,
+    bootstrap_min_record_bytes: u64,
     search_shards: Vec<SearchShard>,
     records: RecordManifest,
     search_size: SizeStats,
@@ -365,7 +372,12 @@ fn write_bootstrap_file(
     if writer.bytes.len() > BOOTSTRAP_BUDGET_BYTES {
         return Err("bootstrap exceeds byte budget".into());
     }
-    write_file(path, &writer.bytes)
+    let decoded_bytes = writer.bytes.len() as u64;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&writer.bytes)?;
+    let compressed = encoder.finish()?;
+    write_file(path, &compressed)?;
+    Ok(decoded_bytes)
 }
 
 fn alias_order(left: &Alias, right: &Alias) -> Ordering {
@@ -453,7 +465,7 @@ fn build_bootstrap(
         }
         let ranges = bootstrap_ranges(aliases, &prefix);
         let matching_aliases = ranges.iter().map(|(_, range)| range.len()).sum();
-        if matching_aliases < BOOTSTRAP_MIN_MATCHING_ALIASES {
+        if matching_aliases < BOOTSTRAP_MIN_DESCENT_ALIASES {
             continue;
         }
         let mut shard_indexes = HashSet::new();
@@ -467,25 +479,26 @@ fn build_bootstrap(
             }
         }
         let search_bytes = shard_indexes.iter().map(|index| search_sizes[*index]).sum();
-        if search_bytes < BOOTSTRAP_MIN_SEARCH_BYTES {
-            continue;
-        }
-
         let ids = rank_prefix(aliases, &ranges);
         let record_shards: HashSet<u32> = ids.iter().map(|id| id / RECORD_SPAN).collect();
         let record_bytes = record_shards
             .iter()
             .map(|index| record_sizes[*index as usize])
             .sum();
-        candidates.push(BootstrapEntry {
-            prefix: prefix.clone(),
-            ids,
-            matching_aliases,
-            search_bytes,
-            search_shards: shard_indexes.len(),
-            record_shards: record_shards.len(),
-            record_bytes,
-        });
+        let broad_search = matching_aliases >= BOOTSTRAP_MIN_BROAD_ALIASES
+            && search_bytes >= BOOTSTRAP_MIN_SEARCH_BYTES;
+        let expensive_records = record_bytes >= BOOTSTRAP_MIN_RECORD_BYTES;
+        if broad_search || expensive_records {
+            candidates.push(BootstrapEntry {
+                prefix: prefix.clone(),
+                ids,
+                matching_aliases,
+                search_bytes,
+                search_shards: shard_indexes.len(),
+                record_shards: record_shards.len(),
+                record_bytes,
+            });
+        }
 
         let prefix_length = prefix.chars().count();
         let mut children = HashSet::new();
@@ -722,16 +735,17 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     }
 
     let bootstrap = build_bootstrap(&aliases, &search_sizes, &record_sizes, &record_entry_sizes);
-    let bootstrap_file = "bootstrap.bin".to_owned();
-    let bootstrap_bytes = write_bootstrap_file(
+    let bootstrap_file = "bootstrap.bin.gz".to_owned();
+    let bootstrap_decoded_bytes = write_bootstrap_file(
         &output.join(&bootstrap_file),
         &bootstrap,
         input,
         &source.surfaces,
     )?;
-    if bootstrap_bytes != bootstrap.bytes {
+    if bootstrap_decoded_bytes != bootstrap.bytes {
         return Err("bootstrap size calculation does not match encoded file".into());
     }
+    let bootstrap_bytes = fs::metadata(output.join(&bootstrap_file))?.len();
 
     let manifest = Manifest {
         format_version: FORMAT_VERSION,
@@ -745,9 +759,13 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         bootstrap_records: bootstrap.record_ids.len(),
         bootstrap_candidate_prefixes: bootstrap.candidate_prefixes,
         bootstrap_bytes,
+        bootstrap_decoded_bytes,
         bootstrap_budget_bytes: BOOTSTRAP_BUDGET_BYTES,
+        bootstrap_compression: "gzip",
         bootstrap_min_search_bytes: BOOTSTRAP_MIN_SEARCH_BYTES,
-        bootstrap_min_matching_aliases: BOOTSTRAP_MIN_MATCHING_ALIASES,
+        bootstrap_min_broad_aliases: BOOTSTRAP_MIN_BROAD_ALIASES,
+        bootstrap_min_descent_aliases: BOOTSTRAP_MIN_DESCENT_ALIASES,
+        bootstrap_min_record_bytes: BOOTSTRAP_MIN_RECORD_BYTES,
         search_shards,
         records: RecordManifest {
             span: RECORD_SPAN,

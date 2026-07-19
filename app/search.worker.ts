@@ -26,7 +26,7 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 6;
+  formatVersion: 7;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
   dataset: string;
@@ -39,16 +39,20 @@ type DictionaryManifest = {
   bootstrapRecords: number;
   bootstrapCandidatePrefixes: number;
   bootstrapBytes: number;
+  bootstrapDecodedBytes: number;
   bootstrapBudgetBytes: number;
+  bootstrapCompression: "gzip";
   bootstrapMinSearchBytes: number;
-  bootstrapMinMatchingAliases: number;
+  bootstrapMinBroadAliases: number;
+  bootstrapMinDescentAliases: number;
+  bootstrapMinRecordBytes: number;
   searchShards: SearchShard[];
   records: { span: number; files: string[] };
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v6",
-  "/data/releases/core-20260428-v6",
+  "/data/releases/full-20260428-v7",
+  "/data/releases/core-20260428-v7",
 ];
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
@@ -146,9 +150,10 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 6 ||
+      dictionaryManifest.formatVersion !== 7 ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
-      dictionaryManifest.headwordFilter !== "dictionary-form-word-id"
+      dictionaryManifest.headwordFilter !== "dictionary-form-word-id" ||
+      dictionaryManifest.bootstrapCompression !== "gzip"
     ) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
     }
@@ -156,7 +161,11 @@ async function loadData() {
     mode = "sharded";
     const bootstrapResponse = await fetch(`${base}/${dictionaryManifest.bootstrapFile}`);
     if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    const bootstrap = decodeBootstrap(await bootstrapResponse.arrayBuffer());
+    if (!bootstrapResponse.body || typeof DecompressionStream === "undefined") {
+      throw new Error("This browser cannot decompress the dictionary bootstrap");
+    }
+    const decompressed = bootstrapResponse.body.pipeThrough(new DecompressionStream("gzip"));
+    const bootstrap = decodeBootstrap(await new Response(decompressed).arrayBuffer());
     bootstrapResults = bootstrap.results;
     entries = bootstrap.entries;
     return;
@@ -308,7 +317,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 6);
+      return decodeAliases(await response.arrayBuffer(), 7);
     });
     searchCache.set(file, promise);
   }
@@ -325,7 +334,7 @@ async function loadRecordIds(ids: number[]) {
       if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
       promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
         if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 6)) {
+        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 7)) {
           entries.set(id, entry);
         }
       });
@@ -441,7 +450,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 6) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 7) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -455,7 +464,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 6) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 6) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 7) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -476,7 +485,7 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 6) {
 function decodeBootstrap(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDBP");
-  reader.version(6);
+  reader.version(7);
   const count = reader.u32();
   const results = new Map<string, number[]>();
   for (let index = 0; index < count; index += 1) {
@@ -492,7 +501,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   const recordCount = reader.u32();
   const bootstrapEntries = new Map<number, Entry>();
   for (let index = 0; index < recordCount; index += 1) {
-    const [id, entry] = decodeEntry(reader, 6);
+    const [id, entry] = decodeEntry(reader, 7);
     bootstrapEntries.set(id, entry);
   }
   reader.done();
@@ -504,7 +513,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   return { results, entries: bootstrapEntries };
 }
 
-function decodeEntry(reader: BinaryReader, version: 2 | 6): [number, Entry] {
+function decodeEntry(reader: BinaryReader, version: 2 | 7): [number, Entry] {
   const id = reader.u32();
   const cost = version === 2 ? reader.u16() : reader.i16();
   const surface = reader.string();

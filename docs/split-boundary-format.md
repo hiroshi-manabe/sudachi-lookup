@@ -5,7 +5,7 @@
 Browser data format v4 stores Structure, A, and B segmentation as
 cumulative Unicode code-point boundaries within the parent entry's `surface`.
 It will not store referenced word IDs in browser record shards.
-Formats v5 and v6 retain the same split representation while adding
+Formats v5 through v7 retain the same split representation while adding
 canonical-headword search filtering and then a cost-driven bootstrap.
 
 For example:

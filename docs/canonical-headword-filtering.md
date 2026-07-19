@@ -2,7 +2,7 @@
 
 ## Status
 
-Stage 1 is implemented in browser-data format v5 and retained by v6 for both
+Stage 1 is implemented in browser-data format v5 and retained through v7 for both
 pinned Core and Full editions. Search aliases and bootstrap results refer only
 to canonical dictionary-form identities. The neutral export and browser record
 shards still retain every source record. Stage 2 record compaction remains
@@ -86,7 +86,7 @@ headword matched, but filtering does not depend on exposing that metadata.
 
 ## Staged implementation
 
-### Stage 1: filter search aliases (implemented in v5 and v6)
+### Stage 1: filter search aliases (implemented in v5 through v7)
 
 - Preserve every record in the neutral export and browser record shards.
 - Add and validate the upstream dictionary-form word ID.
@@ -107,7 +107,7 @@ After Stage 1 behavior is accepted:
 - Rewrite search postings to those IDs.
 - Retain a release report mapping browser IDs to pinned Sudachi word IDs.
 
-Formats v5 and v6 retain v4's surface-boundary representation, which makes this
+Formats v5 through v7 retain v4's surface-boundary representation, which makes this
 easier: Structure, A, and B display data no longer require component record IDs
 to remain present in the browser corpus.
 
@@ -156,14 +156,15 @@ dictionary cost alone. For the broad query `い`, its first 20 Core candidates
 exactly match the first 20 candidates from the complete 51,339-result search.
 This prevents stronger exact matches from appearing only after “load more.”
 
-Format v6 supersedes that alias-based bootstrap with direct top-20 results and
-deduplicated display records for measured expensive prefixes. The 1 MiB Core
-bootstrap selects 546 of 3,663 eligible prefixes and embeds 10,205 records; Full
-selects 545 of 8,118 and embeds 10,570 records. Eligibility currently requires
-at least 192 KiB of routed search shards and 500 matching aliases. Candidates
-are prioritized by the combined search- and record-shard bytes avoided. Core
-checks for `い`, `あい`, and `あお` reproduce the complete search's top 20
-exactly and can render those results without another dictionary request.
+Format v6 superseded that alias-based bootstrap with direct top-20 results and
+deduplicated display records. Format v7 expands the decoded budget to 4 MiB,
+gzip-compresses it for transfer, and allows high record-shard cost to qualify a
+prefix independently of the broad-alias threshold. Core selects 2,060 of 9,047
+eligible prefixes and embeds 39,660 records in 775,326 transferred bytes; Full
+selects 2,079 of 22,501 and embeds 40,082 records in 784,848 bytes. The decoded
+sizes remain just below 4 MiB. Core checks for `い`, `あい`, `あお`, and `あきの`
+reproduce the complete search's top 20 and can render those results without
+another dictionary request.
 
 ## Product effect
 

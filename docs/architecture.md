@@ -195,13 +195,17 @@ The application will therefore use two tiers:
    to route to a reasonably bounded data partition, or when the user continues
    beyond the bootstrap results for a broad query.
 
-Format v6 makes the transition from generated cost statistics rather than
-query length. A prefix is eligible when its routed search data is at least 192
-KiB and it matches at least 500 aliases. Eligible prefixes are prioritized by
-the combined search- and record-shard transfer they avoid, then encoded under a
-hard 1 MiB budget. Records shared by multiple prefixes are stored only once.
-Hiragana and katakana variants share one bootstrap key. Continuation still
-expands into complete prefix shards.
+Format v7 makes the transition from generated cost statistics rather than
+query length. A prefix is eligible either when it matches at least 500 aliases
+and routes at least 192 KiB of search data, or when its initial results require
+at least 1 MiB of record shards. The generator explores branches down to 100
+matching aliases so record-scattered queries such as `あきの` can qualify.
+Eligible prefixes are prioritized by the combined search- and record-shard
+transfer they avoid, then encoded under a hard 4 MiB decoded budget. Records
+shared by multiple prefixes are stored only once. The bootstrap itself is gzip
+compressed for transfer and decompressed in the Worker. Hiragana and katakana
+variants share one bootstrap key. Continuation still expands into complete
+prefix shards.
 
 ### 7.2 Shard routing
 
@@ -333,17 +337,19 @@ The manifest should contain at least:
 
 ```json
 {
-  "formatVersion": 6,
+  "formatVersion": 7,
   "dictionary": {
     "edition": "core",
     "version": "20260428"
   },
   "generatorVersion": "0.1.0",
-  "bootstrapFile": "bootstrap.bin",
-  "bootstrapPrefixes": 546,
-  "bootstrapRecords": 10205,
-  "bootstrapBytes": 1048527,
-  "bootstrapBudgetBytes": 1048576,
+  "bootstrapFile": "bootstrap.bin.gz",
+  "bootstrapPrefixes": 2060,
+  "bootstrapRecords": 39660,
+  "bootstrapBytes": 775326,
+  "bootstrapDecodedBytes": 4194221,
+  "bootstrapBudgetBytes": 4194304,
+  "bootstrapCompression": "gzip",
   "routing": "prefix routing data",
   "recordPartitioning": "record partition metadata"
 }
