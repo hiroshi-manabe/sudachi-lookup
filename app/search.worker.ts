@@ -26,10 +26,13 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 4;
+  formatVersion: 5;
   splitEncoding: "u8-code-point-boundaries";
+  headwordFilter: "dictionary-form-word-id";
   dataset: string;
   entries: number;
+  searchableEntries: number;
+  filteredInflectionEntries: number;
   aliases: number;
   minFullQueryLength: number;
   bootstrapFile: string;
@@ -39,8 +42,8 @@ type DictionaryManifest = {
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v4",
-  "/data/releases/core-20260428-v4",
+  "/data/releases/full-20260428-v5",
+  "/data/releases/core-20260428-v5",
 ];
 const MAX_FULL_ALIASES_FOR_SHORT_QUERY = 10_000;
 const INITIAL_RESULTS = 20;
@@ -81,7 +84,7 @@ self.onmessage = async (event: MessageEvent) => {
       await ensureLoaded();
       self.postMessage({
         type: "ready",
-        entries: dictionaryManifest?.entries ?? entries.size,
+        entries: dictionaryManifest?.searchableEntries ?? entries.size,
         aliases: dictionaryManifest?.aliases ?? sampleAliases.length,
         dataset: dictionaryManifest?.dataset ?? "sample",
       });
@@ -138,8 +141,9 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 4 ||
-      dictionaryManifest.splitEncoding !== "u8-code-point-boundaries"
+      dictionaryManifest.formatVersion !== 5 ||
+      dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
+      dictionaryManifest.headwordFilter !== "dictionary-form-word-id"
     ) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
     }
@@ -147,7 +151,7 @@ async function loadData() {
     mode = "sharded";
     const bootstrapResponse = await fetch(`${base}/${dictionaryManifest.bootstrapFile}`);
     if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    bootstrapAliases = decodeAliases(await bootstrapResponse.arrayBuffer(), 4);
+    bootstrapAliases = decodeAliases(await bootstrapResponse.arrayBuffer(), 5);
     return;
   }
 
@@ -295,7 +299,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 4);
+      return decodeAliases(await response.arrayBuffer(), 5);
     });
     searchCache.set(file, promise);
   }
@@ -312,7 +316,7 @@ async function loadRecordIds(ids: number[]) {
       if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
       promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
         if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 4)) {
+        for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 5)) {
           entries.set(id, entry);
         }
       });
@@ -428,7 +432,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 4) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 5) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -454,7 +458,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 4) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 4) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 5) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);

@@ -13,7 +13,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 4;
+const FORMAT_VERSION: u16 = 5;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const BOOTSTRAP_PER_FIRST_CHARACTER: usize = 64;
@@ -25,6 +25,7 @@ struct SourceEntry {
     reading_form: String,
     normalized_form: String,
     dictionary_form: String,
+    dictionary_form_word_id: i32,
     pos: Vec<String>,
     cost: i16,
     a_split: Vec<u32>,
@@ -36,6 +37,14 @@ struct SourceEntry {
 struct SurfaceEntry {
     word_id: u32,
     surface: String,
+    dictionary_form: String,
+    dictionary_form_word_id: i32,
+}
+
+struct SourceIndex {
+    surfaces: Vec<String>,
+    dictionary_form_word_ids: Vec<i32>,
+    searchable_entries: u64,
 }
 
 #[derive(Clone)]
@@ -80,6 +89,8 @@ struct Manifest {
     format_version: u16,
     dataset: String,
     entries: u64,
+    searchable_entries: u64,
+    filtered_inflection_entries: u64,
     aliases: usize,
     min_full_query_length: usize,
     bootstrap_file: String,
@@ -89,6 +100,7 @@ struct Manifest {
     search_size: SizeStats,
     record_size: SizeStats,
     split_encoding: &'static str,
+    headword_filter: &'static str,
     source_sha256: String,
     elapsed_seconds: f64,
 }
@@ -296,9 +308,14 @@ fn alias_order(left: &Alias, right: &Alias) -> Ordering {
         .then(left.kind.cmp(&right.kind))
 }
 
-fn result_order(left: &Alias, right: &Alias) -> Ordering {
-    left.kind
-        .cmp(&right.kind)
+fn match_score(alias: &Alias, query: &str) -> u8 {
+    let exact = if alias.key == query { 0 } else { 20 };
+    exact + [0, 4, 2, 6][alias.kind as usize]
+}
+
+fn result_order(query: &str, left: &Alias, right: &Alias) -> Ordering {
+    match_score(left, query)
+        .cmp(&match_score(right, query))
         .then(left.cost.cmp(&right.cost))
         .then(left.surface_length.cmp(&right.surface_length))
         .then(left.id.cmp(&right.id))
@@ -312,11 +329,20 @@ fn build_bootstrap(aliases: &[Alias]) -> Vec<Alias> {
         }
     }
     let mut bootstrap = Vec::new();
-    for values in grouped.values_mut() {
+    for (first, values) in grouped {
         if values.len() <= MAX_ALIASES_PER_SHARD {
             continue;
         }
-        values.sort_unstable_by(|left, right| result_order(left, right));
+        let query = first.to_string();
+        let mut best_by_entry: HashMap<u32, &Alias> = HashMap::new();
+        for alias in values {
+            let best = best_by_entry.entry(alias.id).or_insert(alias);
+            if result_order(&query, alias, best).is_lt() {
+                *best = alias;
+            }
+        }
+        let mut values: Vec<&Alias> = best_by_entry.into_values().collect();
+        values.sort_unstable_by(|left, right| result_order(&query, left, right));
         bootstrap.extend(
             values
                 .iter()
@@ -371,8 +397,10 @@ fn source_reader(path: &Path) -> Result<BufReader<GzDecoder<File>>, Box<dyn Erro
     Ok(BufReader::new(GzDecoder::new(File::open(path)?)))
 }
 
-fn load_surfaces(input: &Path) -> Result<Vec<String>, Box<dyn Error>> {
+fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
     let mut surfaces = Vec::new();
+    let mut dictionary_form_word_ids = Vec::new();
+    let mut dictionary_forms = Vec::new();
     for line in source_reader(input)?.lines() {
         let entry: SurfaceEntry = serde_json::from_str(&line?)?;
         if entry.word_id as usize != surfaces.len() {
@@ -384,14 +412,52 @@ fn load_surfaces(input: &Path) -> Result<Vec<String>, Box<dyn Error>> {
             .into());
         }
         surfaces.push(entry.surface);
+        dictionary_forms.push(entry.dictionary_form);
+        dictionary_form_word_ids.push(entry.dictionary_form_word_id);
     }
-    Ok(surfaces)
+
+    let mut searchable_entries = 0_u64;
+    for (word_id, dictionary_form_word_id) in dictionary_form_word_ids.iter().copied().enumerate() {
+        if dictionary_form_word_id == -1 || dictionary_form_word_id == word_id as i32 {
+            searchable_entries += 1;
+            continue;
+        }
+        if dictionary_form_word_id < -1 {
+            return Err(format!(
+                "word {word_id} has invalid dictionary-form word ID {dictionary_form_word_id}",
+            )
+            .into());
+        }
+        let canonical_id = dictionary_form_word_id as usize;
+        let canonical_surface = surfaces.get(canonical_id).ok_or_else(|| {
+            format!("word {word_id} references missing dictionary-form word {canonical_id}")
+        })?;
+        let canonical_target = dictionary_form_word_ids[canonical_id];
+        if canonical_target != -1 && canonical_target != canonical_id as i32 {
+            return Err(format!(
+                "word {word_id} dictionary-form target {canonical_id} is not canonical",
+            )
+            .into());
+        }
+        if canonical_surface != &dictionary_forms[word_id] {
+            return Err(format!(
+                "word {word_id} dictionary form {:?} does not match target {canonical_id} surface {:?}",
+                dictionary_forms[word_id], canonical_surface,
+            )
+            .into());
+        }
+    }
+    Ok(SourceIndex {
+        surfaces,
+        dictionary_form_word_ids,
+        searchable_entries,
+    })
 }
 
 fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     fs::create_dir_all(output)?;
-    let surfaces = load_surfaces(input)?;
+    let source = load_source_index(input)?;
     let mut aliases = Vec::new();
     let mut entries = 0_u64;
     let mut record_files = Vec::new();
@@ -407,7 +473,20 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             )
             .into());
         }
-        add_aliases(&mut aliases, &entry);
+        let expected_dictionary_form_word_id =
+            source.dictionary_form_word_ids[entry.word_id as usize];
+        if entry.dictionary_form_word_id != expected_dictionary_form_word_id {
+            return Err(format!(
+                "dictionary-form identity changed while reading word {}",
+                entry.word_id
+            )
+            .into());
+        }
+        if entry.dictionary_form_word_id == -1
+            || entry.dictionary_form_word_id == entry.word_id as i32
+        {
+            add_aliases(&mut aliases, &entry);
+        }
         record_entries.push(entry);
         entries += 1;
 
@@ -417,7 +496,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
                 &mut record_files,
                 &mut record_sizes,
                 &mut record_entries,
-                &surfaces,
+                &source.surfaces,
             )?;
         }
     }
@@ -427,7 +506,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             &mut record_files,
             &mut record_sizes,
             &mut record_entries,
-            &surfaces,
+            &source.surfaces,
         )?;
     }
 
@@ -460,6 +539,8 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         format_version: FORMAT_VERSION,
         dataset,
         entries,
+        searchable_entries: source.searchable_entries,
+        filtered_inflection_entries: entries - source.searchable_entries,
         aliases: aliases.len(),
         min_full_query_length: 2,
         bootstrap_file,
@@ -472,6 +553,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         search_size: stats(search_sizes),
         record_size: stats(record_sizes),
         split_encoding: "u8-code-point-boundaries",
+        headword_filter: "dictionary-form-word-id",
         source_sha256: sha256_file(input)?,
         elapsed_seconds: started.elapsed().as_secs_f64(),
     };
@@ -482,7 +564,8 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     manifest_output.flush()?;
 
     eprintln!(
-        "built {} entries, {} aliases, {} search shards, and {} record shards in {:.1}s",
+        "built {} searchable entries from {} records, {} aliases, {} search shards, and {} record shards in {:.1}s",
+        manifest.searchable_entries,
         manifest.entries,
         manifest.aliases,
         manifest.search_shards.len(),
@@ -554,6 +637,7 @@ mod tests {
             reading_form: String::new(),
             normalized_form: String::new(),
             dictionary_form: String::new(),
+            dictionary_form_word_id: -1,
             pos: Vec::new(),
             cost: 0,
             a_split: split,
@@ -580,5 +664,24 @@ mod tests {
             split_boundaries(&entry, &entry.a_split, &surfaces, "Structure").unwrap(),
             vec![2],
         );
+    }
+
+    #[test]
+    fn bootstrap_ranking_prefers_exact_matches_before_lower_cost_prefixes() {
+        let exact = Alias {
+            key: "い".into(),
+            id: 1,
+            kind: 0,
+            cost: 10_000,
+            surface_length: 1,
+        };
+        let prefix = Alias {
+            key: "インボディ・ジャパン".into(),
+            id: 2,
+            kind: 0,
+            cost: -924,
+            surface_length: 10,
+        };
+        assert!(result_order("い", &exact, &prefix).is_lt());
     }
 }

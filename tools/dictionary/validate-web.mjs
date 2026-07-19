@@ -6,17 +6,31 @@ const root = resolve(import.meta.dirname, "../..");
 const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v4`;
+const dataset = `${release}-v5`;
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 4) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== 5) throw new Error("Unexpected web format version");
 if (manifest.splitEncoding !== "u8-code-point-boundaries") {
   throw new Error("Unexpected split encoding");
+}
+if (manifest.headwordFilter !== "dictionary-form-word-id") {
+  throw new Error("Unexpected headword filter");
+}
+if (manifest.searchableEntries + manifest.filteredInflectionEntries !== manifest.entries) {
+  throw new Error("Headword counts do not cover every source record");
 }
 if (manifest.dataset !== dataset) throw new Error("Manifest dataset does not match directory");
 if (manifest.records.files.length !== Math.ceil(manifest.entries / manifest.records.span)) {
   throw new Error("Record shard count does not cover every entry");
+}
+const bootstrapHeader = await readHeader(resolve(directory, manifest.bootstrapFile));
+if (
+  bootstrapHeader.magic !== "SDSH" ||
+  bootstrapHeader.version !== 5 ||
+  bootstrapHeader.count !== manifest.bootstrapAliases
+) {
+  throw new Error("Invalid bootstrap header");
 }
 
 let aliasCount = 0;
@@ -25,7 +39,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 4 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== 5 || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -41,7 +55,8 @@ if (entryCount !== manifest.entries) throw new Error("Record shards do not conta
 
 const totalFiles = manifest.searchShards.length + manifest.records.files.length + 2;
 console.log(
-  `Validated ${dataset}: ${manifest.entries} entries, ${manifest.aliases} aliases, ` +
+  `Validated ${dataset}: ${manifest.searchableEntries} searchable entries, ` +
+  `${manifest.aliases} aliases, ` +
   `${totalFiles} dictionary files.`,
 );
 
@@ -70,7 +85,7 @@ async function validateRecordShard(path, firstExpectedId) {
   offset += 2;
   const count = bytes.readUInt32LE(offset);
   offset += 4;
-  if (magic !== "SDRE" || version !== 4) throw new Error(`Invalid record shard header: ${path}`);
+  if (magic !== "SDRE" || version !== 5) throw new Error(`Invalid record shard header: ${path}`);
 
   const readString = () => {
     const length = bytes.readUInt16LE(offset);

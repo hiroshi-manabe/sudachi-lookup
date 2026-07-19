@@ -108,11 +108,12 @@ not a prerequisite.
 ### 4.6 Publish canonical headwords, not tokenizer inflection records
 
 The neutral export remains a lossless representation of the pinned Sudachi
-lexicon, but the browser search index should expose canonical dictionary-form
+lexicon, while browser-data format v5 exposes canonical dictionary-form
 identities rather than every conjugation-state record used during tokenization.
-Filtering must use the upstream dictionary-form word ID and preserve distinct
-homographs; surface-string grouping is insufficient. The staged policy and its
-validation requirements are defined in
+Filtering uses the upstream dictionary-form word ID and preserves distinct
+homographs; surface-string grouping is insufficient. Browser record shards
+remain lossless in Stage 1, so record compaction can be evaluated separately.
+The staged policy and its validation requirements are defined in
 [Canonical Headword Filtering](canonical-headword-filtering.md).
 
 ## 5. Logical data model

@@ -2,8 +2,11 @@
 
 ## Status
 
-Design decision recorded for the next browser-data iteration. This policy is
-not implemented in format v4.
+Stage 1 is implemented in browser-data format v5 for both pinned Core and Full
+editions. Search aliases and bootstrap entries are emitted only for canonical
+dictionary-form identities. The neutral export and browser record shards still
+retain every source record. Stage 2 record compaction remains optional future
+work.
 
 ## Product distinction
 
@@ -61,15 +64,17 @@ heuristic is not acceptable.
 
 ## Search behavior
 
-For an inflecting headword such as `食べる`, the browser index should expose one
-canonical result. Its aliases may include the canonical surface, dictionary
-form, normalized form, and canonical reading.
+For an inflecting headword such as `食べる`, the browser index exposes canonical
+results rather than its conjugation-state records. Its aliases may include the
+canonical surface, dictionary form, normalized form, and canonical reading.
+Separately canonical identities are intentionally preserved, including variant
+spellings whose normalized form is also `食べる`.
 
 Expected behavior:
 
 | Query | Expected result |
 | --- | --- |
-| `食べる` | Canonical `食べる` headword |
+| `食べる` | Canonical headwords matching `食べる`; no conjugation-state duplicates |
 | `食べ` | Canonical `食べる` through prefix search |
 | `タベル` / `たべる` | Canonical `食べる` through reading aliases |
 | `食べよう` | No match solely because it is an inflected Sudachi record |
@@ -81,7 +86,7 @@ headword matched, but filtering does not depend on exposing that metadata.
 
 ## Staged implementation
 
-### Stage 1: filter search aliases
+### Stage 1: filter search aliases (implemented in v5)
 
 - Preserve every record in the neutral export and browser record shards.
 - Add and validate the upstream dictionary-form word ID.
@@ -102,9 +107,9 @@ After Stage 1 behavior is accepted:
 - Rewrite search postings to those IDs.
 - Retain a release report mapping browser IDs to pinned Sudachi word IDs.
 
-Format v4's surface-boundary representation makes this easier: Structure, A,
-and B display data no longer require component record IDs to remain present in
-the browser corpus.
+Format v5 retains v4's surface-boundary representation, which makes this
+easier: Structure, A, and B display data no longer require component record IDs
+to remain present in the browser corpus.
 
 ## Validation and exceptions
 
@@ -124,11 +129,37 @@ i-adjective, a na-adjective, and the auxiliary `た`. Entries whose inflected
 surface is independently lexicalized must remain available through their own
 canonical identity rather than through the discarded inflectional record.
 
-## Expected effect
+## Measured effect
 
-Canonical filtering should make result sets read like a dictionary rather than
-Sudachi's internal tokenizer lexicon. It should also reduce alias counts and the
-amount of work required for broad-prefix ranking. The actual size and latency
-benefit must be measured after Stage 1; it is a consequence of the product
-policy, not the reason to apply an unsafe grouping heuristic.
+The pinned 20260428 builds produce the following Stage 1 comparison. Directory
+sizes are local raw filesystem totals; record shards remain unchanged apart
+from the format-version header.
 
+| Measurement | Core v4 | Core v5 | Full v4 | Full v5 |
+| --- | ---: | ---: | ---: | ---: |
+| Source records | 1,629,080 | 1,629,080 | 2,883,177 | 2,883,177 |
+| Searchable canonical entries | 1,629,080 | 1,198,652 | 2,883,177 | 2,452,463 |
+| Filtered inflection records | 0 | 430,428 | 0 | 430,714 |
+| Search aliases | 8,140,461 | 5,988,321 | 14,410,650 | 12,257,080 |
+| Search shards | 1,629 | 1,198 | 2,883 | 2,452 |
+| Total dictionary files | 2,427 | 1,996 | 4,293 | 3,862 |
+| Bootstrap bytes | 303,834 | 226,793 | 414,504 | 342,160 |
+| Generated directory | 452 MiB | 401 MiB | 837 MiB | 786 MiB |
+
+Core removes 26.4% of its aliases; Full removes 14.9%. Both save about 51 MiB
+without compacting record storage. Generator validation also confirms that
+every noncanonical record resolves to an in-range canonical identity whose
+surface equals the record's upstream dictionary form.
+
+The v5 bootstrap is ranked for the actual one-character query rather than by
+dictionary cost alone. For the broad query `い`, its first 20 Core candidates
+exactly match the first 20 candidates from the complete 51,339-result search.
+This prevents stronger exact matches from appearing only after “load more.”
+
+## Product effect
+
+Canonical filtering makes result sets read like a dictionary rather than
+Sudachi's internal tokenizer lexicon. It also reduces alias counts and the
+amount of work required for broad-prefix ranking. The size and latency benefit
+is a consequence of the product policy, not the reason to apply an unsafe
+grouping heuristic.

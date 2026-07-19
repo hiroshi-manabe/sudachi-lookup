@@ -11,12 +11,13 @@ domain. It requires no application server, search API, or hosted database.
 ## Project status
 
 The local vertical slice, complete SudachiDict Core/Full exporter, and
-range-sharded browser format are implemented. Format v4 stores Structure and
-A/B segmentation as eager one-byte boundaries in each parent record. The
-interface supports navigable compound components, mode badges, and
-mode-specific expansion without loading component records. The browser prefers
-generated Full or Core assets when present and otherwise falls back to the
-deterministic fixture.
+range-sharded browser format are implemented. Format v5 publishes only
+canonical dictionary-form identities in search while retaining every source
+record for lossless navigation. It inherits v4's eager one-byte boundaries for
+Structure and A/B segmentation. The interface supports navigable compound
+components, mode badges, and mode-specific expansion without loading component
+records. The browser prefers generated Full or Core assets when present and
+otherwise falls back to the deterministic fixture.
 
 The proposed first release will provide:
 
@@ -71,10 +72,10 @@ Generated dictionary assets should not be edited manually. Each release should
 record the source dictionary edition and version, generator version, data-format
 version, checksums, and applicable notices.
 
-The next browser-data policy will distinguish dictionary headwords from
-Sudachi's internal conjugation-state records. The neutral export remains
-lossless, while the web index will move toward canonical headword results as
-described in
+The browser-data policy distinguishes dictionary headwords from Sudachi's
+internal conjugation-state records. The neutral export and browser record
+shards remain lossless, while format v5 indexes only canonical headword results
+as described in
 [docs/canonical-headword-filtering.md](docs/canonical-headword-filtering.md).
 
 ## Run with SudachiDict Core locally
