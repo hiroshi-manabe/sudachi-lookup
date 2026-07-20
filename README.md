@@ -107,7 +107,8 @@ npm run build:pages -- --edition core
 npm run build:pages -- --edition full
 ```
 
-Stable preview deployments are available at:
+The public Full site is available at [sudachi.vocrf.net](https://sudachi.vocrf.net).
+Stable preview deployments remain available for release checks and comparison:
 
 - [Sample](https://staging.sudachi-lookup.pages.dev)
 - [Core](https://core-staging.sudachi-lookup.pages.dev)

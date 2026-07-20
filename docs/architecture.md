@@ -498,6 +498,8 @@ checks. An optional staging subdomain may point at a stable preview branch.
 
 The production site consists only of static application files and dictionary
 assets. Pages Functions, D1, KV, and R2 are unnecessary for the initial design.
+The deployed Full site uses <https://sudachi.vocrf.net>; its external Netlify
+DNS record points to the Pages production hostname.
 
 The current Vinext build is an intermediate application build rather than the
 final Pages artifact: it emits a Worker entry point and browser assets without a

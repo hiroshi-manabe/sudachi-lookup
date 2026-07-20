@@ -298,6 +298,10 @@ its default compression and cache behavior in
 
 ## When to connect the custom domain
 
+The production Full site is published at <https://sudachi.vocrf.net>. The
+hostname is registered with the Pages project and is a Netlify DNS CNAME to
+`sudachi-lookup.pages.dev`; the `vocrf.net` apex remains separate.
+
 Do not attach the production domain merely to reserve it. Connect it when the
 release candidate satisfies all of the following:
 

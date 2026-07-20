@@ -104,7 +104,8 @@ npm run build:pages -- --edition core
 npm run build:pages -- --edition full
 ```
 
-固定されたプレビュー環境:
+Fullの公開サイトは[sudachi.vocrf.net](https://sudachi.vocrf.net)です。
+リリース確認と比較のため、固定されたプレビュー環境も維持しています。
 
 - [サンプル](https://staging.sudachi-lookup.pages.dev)
 - [Core](https://core-staging.sudachi-lookup.pages.dev)
