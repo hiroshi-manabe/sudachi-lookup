@@ -278,7 +278,23 @@ export function LookupApp() {
                         onNavigate={navigateToComponent}
                       />
                     </div>
-                    <span className="reading" lang="ja">{result.readingForm}</span>
+                    <div className="entry-subline">
+                      <span className="reading" lang="ja">{result.readingForm}</span>
+                      <span className="entry-web-search">
+                        <span className="entry-subline-separator" aria-hidden="true">·</span>
+                        <a
+                          className="web-search"
+                          href={webSearchUrl(result.surface)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`「${result.surface}」をウェブで検索（新しいタブで開きます）`}
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <span>ウェブで検索</span>
+                          <span aria-hidden="true">↗</span>
+                        </a>
+                      </span>
+                    </div>
                   </div>
                   <div className="details">
                     <div className="form-line">
@@ -320,17 +336,6 @@ export function LookupApp() {
                         <span className="expand-symbol" aria-hidden="true">+</span>
                       </button>
                     ) : <span className="expand-hint">A単位</span>}
-                    <a
-                      className="web-search"
-                      href={webSearchUrl(result.surface)}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      aria-label={`「${result.surface}」をウェブで検索（新しいタブで開きます）`}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <span>ウェブで検索</span>
-                      <span aria-hidden="true">↗</span>
-                    </a>
                   </div>
                 </div>
                 {expanded && result.splits ? (

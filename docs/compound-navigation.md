@@ -51,9 +51,11 @@ self-match. Its activation must not toggle split expansion on the result card.
 Metadata labels and values occupy explicit grid columns so adjacent POS and
 Normalized rows cannot run together.
 
-Every result also offers a secondary `ウェブで検索` action. It searches the
-result surface on Google in a new tab and must not toggle split expansion. The
-visible label stays provider-neutral so a future version can make the provider
+Every result also offers a secondary `ウェブで検索` action beside its reading,
+directly beneath the headword. This keeps the action associated with the entry
+without mixing it into clickable Structure components. It searches the result
+surface on Google in a new tab and must not toggle split expansion. The visible
+label stays provider-neutral so a future version can make the provider
 configurable without changing the result layout. Provider selection is only a
 possible future task, not a first-release requirement. The external request is
 made only after the user activates this action.

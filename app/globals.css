@@ -303,9 +303,25 @@ button {
 }
 
 .reading {
-  display: block;
-  margin-top: 4px;
   letter-spacing: 0.04em;
+}
+
+.entry-subline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  margin-top: 4px;
+}
+
+.entry-subline-separator {
+  color: var(--line);
+}
+
+.entry-web-search {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
 }
 
 .form-line {
@@ -359,9 +375,8 @@ button {
 
 .result-actions {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .web-search {
