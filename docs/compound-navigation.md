@@ -138,6 +138,12 @@ Searching by surface is intentional. A component surface may correspond to
 multiple dictionary entries, and the next result screen should expose those
 homographs instead of silently selecting only the referenced word ID.
 
+A separate future relationship mode may start from a particular result identity
+and find canonical parents whose direct Structure ends with that entry. It must
+not change this surface-based navigation behavior. Its data, token-style search
+control, URL state, and staged implementation are specified in
+[Reverse Structure Lookup Plan](structure-tail-lookup.md).
+
 ## Event and markup model
 
 The current prototype makes an entire result card a single button. That model
