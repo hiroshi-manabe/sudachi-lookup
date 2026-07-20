@@ -18,7 +18,7 @@ export function LookupApp() {
   const queryRef = useRef(INITIAL_QUERY);
   const [query, setQuery] = useState(INITIAL_QUERY);
   const [resultSlots, setResultSlots] = useState<ResultSlot[]>([]);
-  const [status, setStatus] = useState("Loading local dictionary…");
+  const [status, setStatus] = useState("辞書を読み込んでいます…");
   const [dataset, setDataset] = useState("sample");
   const [activeIndex, setActiveIndex] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -41,7 +41,7 @@ export function LookupApp() {
       const message = event.data;
       if (message.type === "ready") {
         setDataset(message.dataset);
-        setStatus(`${message.entries} entries · ${message.aliases} searchable forms`);
+        setStatus(`${message.entries.toLocaleString("ja-JP")}語 · ${message.aliases.toLocaleString("ja-JP")}検索形`);
         search(queryRef.current, worker);
       } else if (message.type === "result-slots") {
         if (message.requestId !== requestIdRef.current) return;
@@ -192,13 +192,13 @@ export function LookupApp() {
         </div>
         <span className="edition">{
           dataset === "sample"
-            ? "Sample dataset"
+            ? "サンプルデータ"
             : dataset.startsWith("full-") ? "SudachiDict Full" : "SudachiDict Core"
         }</span>
       </header>
 
-      <section className="search-panel" aria-label="Dictionary search">
-        <label className="search-label" htmlFor="lookup-query">Search the Sudachi lexicon</label>
+      <section className="search-panel" aria-label="辞書検索">
+        <label className="search-label" htmlFor="lookup-query">Sudachi辞書を検索</label>
         <div className="search-row">
           <input
             ref={inputRef}
@@ -220,7 +220,7 @@ export function LookupApp() {
           <kbd className="shortcut">⌘ K</kbd>
         </div>
         <div className="search-meta">
-          <span className="privacy-note">Queries stay in this browser</span>
+          <span className="privacy-note">検索はブラウザ内で完結します</span>
           <span>{status}</span>
         </div>
       </section>
@@ -231,19 +231,19 @@ export function LookupApp() {
         aria-busy={searchState === "loading" || searchState === "searching" || searchState === "hydrating"}
       >
         <div className="results-header">
-          <h2 className="results-title" id="results-heading">Matches</h2>
+          <h2 className="results-title" id="results-heading">検索結果</h2>
           <span className="result-count">{
             searchState === "loading"
-              ? "Loading…"
+              ? "読み込み中…"
               : searchState === "idle"
-                ? "0 results"
+                ? "0件"
               : searchState === "searching"
-                ? "Searching…"
+                ? "検索中…"
                 : searchState === "hydrating"
-                  ? `${loadedCount} of ${resultSlots.length} loaded`
+                  ? `${loadedCount} / ${resultSlots.length}件を読み込み済み`
                 : searchState === "error"
-                  ? "Unavailable"
-                  : `${loadedCount}${hasMore ? "+" : ""} ${loadedCount === 1 ? "result" : "results"}`
+                  ? "利用できません"
+                  : `${loadedCount.toLocaleString("ja-JP")}${hasMore ? "+" : ""}件`
           }</span>
         </div>
 
@@ -281,16 +281,16 @@ export function LookupApp() {
                   </div>
                   <div className="details">
                     <div className="form-line">
-                      <span className="form-label">Part of speech</span>
+                      <span className="form-label">品詞</span>
                       <span className="form-value">{result.pos}</span>
                     </div>
                     <div className="form-line">
-                      <span className="form-label">Normalized</span>
+                      <span className="form-label">正規化形</span>
                       {shouldNavigateToValue(query, result.normalizedForm) ? (
                         <button
                           type="button"
                           className="form-link"
-                          aria-label={`Search for normalized form ${result.normalizedForm}`}
+                          aria-label={`正規化形「${result.normalizedForm}」を検索`}
                           lang="ja"
                           onClick={(event) => {
                             event.stopPropagation();
@@ -308,16 +308,16 @@ export function LookupApp() {
                       className="expand-control"
                       aria-expanded={expanded}
                       aria-controls={panelId}
-                      aria-label={`${expanded ? "Hide" : "Show"} split modes for ${result.surface}`}
+                      aria-label={`「${result.surface}」の分割単位を${expanded ? "閉じる" : "開く"}`}
                       onClick={(event) => {
                         event.stopPropagation();
                         toggleResult(result);
                       }}
                     >
-                      <span>Split modes</span>
+                      <span>分割単位</span>
                       <span className="expand-symbol" aria-hidden="true">+</span>
                     </button>
-                  ) : <span className="expand-hint">A unit</span>}
+                  ) : <span className="expand-hint">A単位</span>}
                 </div>
                 {expanded && result.splits ? (
                   <SplitPanel id={panelId} result={result} onNavigate={navigateToComponent} />
@@ -328,14 +328,14 @@ export function LookupApp() {
           {!resultSlots.length ? (
             <div className="empty">{
               searchState === "loading"
-                ? "Loading dictionary…"
+                ? "辞書を読み込んでいます…"
                 : searchState === "idle"
-                  ? "Enter a word to search."
+                  ? "検索語を入力してください。"
                 : searchState === "searching"
-                  ? "Searching…"
+                  ? "検索中…"
                   : searchState === "error"
-                    ? "Search unavailable."
-                    : "No prefix matches."
+                    ? "検索を利用できません。"
+                    : "一致する語がありません。"
             }</div>
           ) : null}
         </div>
@@ -350,10 +350,10 @@ export function LookupApp() {
                 onClick={requestMore}
               >
                 {loadingMore
-                  ? "Loading more…"
-                  : automaticLoadBlocked ? "Retry loading more" : "Load more results"}
+                  ? "さらに読み込んでいます…"
+                  : automaticLoadBlocked ? "もう一度読み込む" : "さらに読み込む"}
               </button>
-            ) : <span className="result-end">End of results</span>}
+            ) : <span className="result-end">すべての結果を表示しました</span>}
           </div>
         ) : null}
       </section>
@@ -361,11 +361,11 @@ export function LookupApp() {
       <footer className="footer">
         <span>{
           dataset === "sample"
-            ? "Small local development fixture"
+            ? "ローカル開発用サンプル"
             : dataset.startsWith("full-") ? "SudachiDict Full 20260428" : "SudachiDict Core 20260428"
         }</span>
-        <span>Binary data decoded and searched inside a Web Worker</span>
-        <a className="footer-link" href="/notices/">Dictionary notices</a>
+        <span>バイナリ辞書をWeb Worker内で検索</span>
+        <a className="footer-link" href="/notices/">辞書のライセンス情報</a>
       </footer>
     </div>
   );
@@ -455,7 +455,7 @@ function SplitRow({
 }
 
 function UnitBadge({ mode }: { mode: UnitMode }) {
-  return <span className="mode" aria-label={`${mode} unit`}>{mode}</span>;
+  return <span className="mode" aria-label={`${mode}単位`}>{mode}</span>;
 }
 
 function ComponentSequence({
@@ -476,7 +476,7 @@ function ComponentSequence({
             <button
               type="button"
               className="component-link"
-              aria-label={`Search for ${segment}`}
+              aria-label={`「${segment}」を検索`}
               onClick={(event) => {
                 event.stopPropagation();
                 onNavigate(segment);

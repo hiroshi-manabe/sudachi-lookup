@@ -22,7 +22,10 @@ through one compressed shared table instead of repeating POS strings. The
 bootstrap is stored as gzip, keeping the Core transfer below 0.85 MiB. It
 inherits v4's eager one-byte boundaries for Structure and A/B segmentation.
 The interface supports navigable compound components, mode badges, and
-mode-specific expansion without loading component records. For queries outside
+mode-specific expansion without loading component records. Its visible copy,
+loading and error states, accessibility labels, and supporting static pages are
+Japanese; the product name, A/B/C badges, and Core/Full edition names remain
+unchanged. For queries outside
 the bootstrap, it reserves the first result slots immediately, locks their
 ranking after search shards arrive, and fills cards in place as cached or
 newly fetched record shards become available. The browser prefers generated

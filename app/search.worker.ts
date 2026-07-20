@@ -141,7 +141,7 @@ self.onmessage = async (event: MessageEvent) => {
     if (message.requestId && message.requestId !== activeRequestId) return;
     self.postMessage({
       type: "error",
-      message: error instanceof Error ? error.message : "Dictionary loading failed",
+      message: error instanceof Error ? error.message : "辞書の読み込みに失敗しました",
       requestId: message.requestId,
     });
   }
@@ -166,7 +166,7 @@ async function loadData() {
       dictionaryManifest.posCompression !== "gzip" ||
       dictionaryManifest.bootstrapCompression !== "gzip"
     ) {
-      throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
+      throw new Error(`対応していない辞書形式です: ${dictionaryManifest.formatVersion}`);
     }
     dictionaryBase = base;
     mode = "sharded";
@@ -174,11 +174,11 @@ async function loadData() {
       fetch(`${base}/${dictionaryManifest.bootstrapFile}`),
       fetch(`${base}/${dictionaryManifest.posTableFile}`),
     ]);
-    if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    if (!posResponse.ok) throw new Error("Dictionary POS table could not be loaded");
+    if (!bootstrapResponse.ok) throw new Error("辞書の初期インデックスを読み込めませんでした");
+    if (!posResponse.ok) throw new Error("辞書の品詞表を読み込めませんでした");
     const [bootstrapBuffer, posBuffer] = await Promise.all([
-      decompressGzip(bootstrapResponse, "dictionary bootstrap"),
-      decompressGzip(posResponse, "dictionary POS table"),
+      decompressGzip(bootstrapResponse, "辞書の初期インデックス"),
+      decompressGzip(posResponse, "辞書の品詞表"),
     ]);
     posTable = decodePosTable(posBuffer, dictionaryManifest.posCount);
     const bootstrap = decodeBootstrap(bootstrapBuffer);
@@ -188,16 +188,16 @@ async function loadData() {
   }
 
   const manifestResponse = await fetch("/data/sample/manifest.json");
-  if (!manifestResponse.ok) throw new Error("Dictionary manifest could not be loaded");
+  if (!manifestResponse.ok) throw new Error("辞書マニフェストを読み込めませんでした");
   if (!isJsonResponse(manifestResponse)) {
-    throw new Error("Dictionary manifest returned non-JSON content");
+    throw new Error("辞書マニフェストがJSONではありません");
   }
   const manifest = await manifestResponse.json();
   const [entriesResponse, indexResponse] = await Promise.all([
     fetch(`/data/sample/${manifest.entriesFile}`),
     fetch(`/data/sample/${manifest.indexFile}`),
   ]);
-  if (!entriesResponse.ok || !indexResponse.ok) throw new Error("Sample dictionary could not be loaded");
+  if (!entriesResponse.ok || !indexResponse.ok) throw new Error("サンプル辞書を読み込めませんでした");
   entries = decodeEntries(await entriesResponse.arrayBuffer(), 2);
   sampleAliases = decodeAliases(await indexResponse.arrayBuffer(), 2);
 }
@@ -208,7 +208,7 @@ function isJsonResponse(response: Response) {
 
 async function decompressGzip(response: Response, label: string) {
   if (!response.body || typeof DecompressionStream === "undefined") {
-    throw new Error(`This browser cannot decompress the ${label}`);
+    throw new Error(`このブラウザでは${label}を展開できません`);
   }
   const decompressed = response.body.pipeThrough(new DecompressionStream("gzip"));
   return new Response(decompressed).arrayBuffer();
@@ -365,7 +365,7 @@ async function loadSearchShard(file: string) {
   let promise = searchCache.get(file);
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
-      if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
+      if (!response.ok) throw new Error(`検索データを読み込めませんでした: ${file}`);
       return decodeAliases(await response.arrayBuffer(), 9);
     });
     searchCache.set(file, promise);
@@ -378,9 +378,9 @@ function loadRecordShard(index: number) {
   let promise = recordCache.get(index);
   if (!promise) {
     const file = manifest.records.files[index];
-    if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
+    if (!file) return Promise.reject(new Error(`辞書データが見つかりません: ${index}`));
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
-      if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
+      if (!response.ok) throw new Error(`辞書データを読み込めませんでした: ${file}`);
       for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 9)) {
         entries.set(id, entry);
       }
@@ -543,7 +543,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
     for (let resultIndex = 0; resultIndex < resultCount; resultIndex += 1) {
       ids.push(reader.u32());
     }
-    if (results.has(prefix)) throw new Error(`Duplicate bootstrap prefix: ${prefix}`);
+    if (results.has(prefix)) throw new Error(`初期インデックスの接頭辞が重複しています: ${prefix}`);
     results.set(prefix, ids);
   }
   const recordCount = reader.u32();
@@ -555,7 +555,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   reader.done();
   for (const [prefix, ids] of results) {
     if (ids.some((id) => !bootstrapEntries.has(id))) {
-      throw new Error(`Bootstrap results are missing records for ${prefix}`);
+      throw new Error(`初期インデックスに「${prefix}」の辞書データがありません`);
     }
   }
   return { results, entries: bootstrapEntries };
@@ -583,11 +583,11 @@ function decodePosTable(buffer: ArrayBuffer, expectedCount: number) {
   reader.magic("SDPO");
   reader.version(9);
   const count = reader.u32();
-  if (count !== expectedCount) throw new Error("Dictionary POS count does not match manifest");
+  if (count !== expectedCount) throw new Error("辞書の品詞数がマニフェストと一致しません");
   const decoded = new Map<number, string>();
   for (let index = 0; index < count; index += 1) {
     const id = reader.u16();
-    if (decoded.has(id)) throw new Error(`Duplicate dictionary POS ID: ${id}`);
+    if (decoded.has(id)) throw new Error(`辞書の品詞IDが重複しています: ${id}`);
     decoded.set(id, reader.string());
   }
   reader.done();
@@ -596,7 +596,7 @@ function decodePosTable(buffer: ArrayBuffer, expectedCount: number) {
 
 function resolvePos(id: number) {
   const pos = posTable.get(id);
-  if (pos === undefined) throw new Error(`Missing dictionary POS ID: ${id}`);
+  if (pos === undefined) throw new Error(`辞書の品詞IDが見つかりません: ${id}`);
   return pos;
 }
 
@@ -614,12 +614,12 @@ class BinaryReader {
   magic(expected: string) {
     const actual = this.decoder.decode(this.bytes.subarray(this.offset, this.offset + 4));
     this.offset += 4;
-    if (actual !== expected) throw new Error(`Invalid dictionary magic: ${actual}`);
+    if (actual !== expected) throw new Error(`辞書データの識別子が不正です: ${actual}`);
   }
 
   version(expected: number) {
     const version = this.u16();
-    if (version !== expected) throw new Error(`Unsupported dictionary format: ${version}`);
+    if (version !== expected) throw new Error(`対応していない辞書形式です: ${version}`);
   }
 
   u8() {
@@ -661,6 +661,6 @@ class BinaryReader {
   }
 
   done() {
-    if (this.offset !== this.view.byteLength) throw new Error("Trailing bytes in dictionary shard");
+    if (this.offset !== this.view.byteLength) throw new Error("辞書データの末尾に不正なデータがあります");
   }
 }

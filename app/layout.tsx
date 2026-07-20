@@ -3,12 +3,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Sudachi Lookup",
-  description: "Fast, private, in-browser lookup for the Sudachi Japanese lexicon.",
+  description: "Sudachiの日本語辞書をブラウザ内で検索します。",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="ja">
       <body>{children}</body>
     </html>
   );
