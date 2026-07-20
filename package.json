@@ -25,8 +25,9 @@
     "data:core:validate": "SUDACHI_EDITION=core node tools/dictionary/validate-web.mjs",
     "data:full:install": "SUDACHI_EDITION=full node tools/dictionary/install-official-dictionary.mjs",
     "data:full:validate": "SUDACHI_EDITION=full node tools/dictionary/validate-web.mjs",
+    "docs:check": "node tools/docs/check-locales.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "npm run data:release:check && npm run data:sample && npm test && tsc --noEmit && npm run build && npm run build:pages -- --edition sample"
+    "check": "npm run data:release:check && npm run docs:check && npm run data:sample && npm test && tsc --noEmit && npm run build && npm run build:pages -- --edition sample"
   },
   "dependencies": {
     "next": "16.2.6",

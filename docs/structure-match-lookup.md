@@ -1,5 +1,7 @@
 # Structure Match Lookup Plan
 
+English | [日本語](ja/structure-match-lookup.md)
+
 ## Status
 
 Planned optional feature. This document defines the product and data design but

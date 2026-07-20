@@ -1,5 +1,7 @@
 # Compact Split Boundary Format
 
+English | [日本語](ja/split-boundary-format.md)
+
 ## Decision
 
 Browser data format v4 stores Structure, A, and B segmentation as

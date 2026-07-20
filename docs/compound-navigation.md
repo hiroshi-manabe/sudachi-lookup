@@ -1,5 +1,7 @@
 # Compound Navigation Interaction Specification
 
+English | [日本語](ja/compound-navigation.md)
+
 ## Status
 
 Implemented in browser data format v4. Structure and A/B word-ID references are

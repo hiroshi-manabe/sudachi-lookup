@@ -1,5 +1,7 @@
 # Sudachi Lookup: Product and Architecture Specification
 
+English | [日本語](ja/architecture.md)
+
 ## 1. Purpose
 
 Sudachi Lookup will make the Sudachi Japanese lexicon searchable without a

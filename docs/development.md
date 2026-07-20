@@ -1,5 +1,7 @@
 # Development and Deployment Workflow
 
+English | [日本語](ja/development.md)
+
 ## Overview
 
 Sudachi Lookup has two distinct products to build:

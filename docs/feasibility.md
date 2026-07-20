@@ -1,5 +1,7 @@
 # Initial Feasibility Findings
 
+English | [日本語](ja/feasibility.md)
+
 ## Implemented vertical slice
 
 The first local milestone is implemented and runs through the same boundaries

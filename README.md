@@ -137,11 +137,17 @@ legal/                SudachiDict license and attribution notices
 
 ## Documentation
 
+English documentation is canonical if the two languages temporarily differ.
+Every human-facing design document has a Japanese counterpart linked from its
+page and from the Japanese README.
+
 - [Architecture and product specification](docs/architecture.md)
 - [Development and deployment workflow](docs/development.md)
 - [Initial feasibility findings](docs/feasibility.md)
 - [Compound navigation interaction](docs/compound-navigation.md)
 - [Structure Match lookup](docs/structure-match-lookup.md)
+- [Canonical headword filtering](docs/canonical-headword-filtering.md)
+- [Compact split-boundary format](docs/split-boundary-format.md)
 
 ## License
 

@@ -1,5 +1,7 @@
 # Canonical Headword Filtering
 
+English | [日本語](ja/canonical-headword-filtering.md)
+
 ## Status
 
 Stage 1 is implemented in browser-data format v5 and retained through v10 for both
