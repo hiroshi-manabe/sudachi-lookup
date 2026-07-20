@@ -16,6 +16,8 @@ export function LookupApp() {
   const loadingMoreRequestRef = useRef(false);
   const loadMoreRef = useRef<HTMLButtonElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const searchPanelRef = useRef<HTMLElement>(null);
+  const structureControlRef = useRef<HTMLDivElement>(null);
   const composingRef = useRef(false);
   const queryRef = useRef(INITIAL_QUERY);
   const structureRef = useRef<StructureLookup | null>(null);
@@ -205,7 +207,7 @@ export function LookupApp() {
     setExpandedId(null);
     updateQueryUrl(nextQuery, "push");
     search(nextQuery);
-    inputRef.current?.focus();
+    returnToSearchControl("text");
   }
 
   function enterStructureLookup(result: LookupResult, position: StructurePosition) {
@@ -216,6 +218,7 @@ export function LookupApp() {
     setQuery("");
     updateStructureUrl(next, "push");
     searchStructure(next);
+    returnToSearchControl("structure");
   }
 
   function switchStructurePosition(position: StructurePosition) {
@@ -236,6 +239,17 @@ export function LookupApp() {
     updateQueryUrl("", "replace");
     search("");
     requestAnimationFrame(() => inputRef.current?.focus());
+  }
+
+  function returnToSearchControl(target: "text" | "structure") {
+    requestAnimationFrame(() => {
+      const control = target === "text" ? inputRef.current : structureControlRef.current;
+      control?.focus({ preventScroll: true });
+      searchPanelRef.current?.scrollIntoView({
+        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+        block: "start",
+      });
+    });
   }
 
   function toggleResult(result: LookupResult) {
@@ -272,13 +286,14 @@ export function LookupApp() {
         }</span>
       </header>
 
-      <section className="search-panel" aria-label="辞書検索">
+      <section ref={searchPanelRef} className="search-panel" aria-label="辞書検索">
         {structureLookup
           ? <div className="search-label">構造一致</div>
           : <label className="search-label" htmlFor="lookup-query">Sudachi辞書を検索</label>}
         <div className="search-row">
           {structureLookup ? (
             <div
+              ref={structureControlRef}
               className="structure-control"
               tabIndex={0}
               onKeyDown={(event) => {
