@@ -645,6 +645,12 @@ button {
   color: var(--leaf);
 }
 
+.footer-links {
+  display: flex;
+  gap: 18px;
+  align-items: baseline;
+}
+
 @media (max-width: 760px) {
   .shell {
     width: min(100% - 24px, 680px);
@@ -675,6 +681,10 @@ button {
   .footer {
     flex-direction: column;
     gap: 6px;
+  }
+
+  .footer-links {
+    flex-wrap: wrap;
   }
 }
 

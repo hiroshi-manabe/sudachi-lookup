@@ -7,6 +7,7 @@ import releaseConfig from "../config/dictionary-release.json";
 const INITIAL_QUERY = "";
 const INITIAL_RESULT_SLOTS = 20;
 const WEB_SEARCH_URL = "https://www.google.com/search?q=";
+const SOURCE_REPOSITORY_URL = "https://github.com/hiroshi-manabe/sudachi-lookup";
 type SearchState = "loading" | "idle" | "searching" | "hydrating" | "settled" | "error";
 type ResultSlot = { id: number | null; result: LookupResult | null };
 type StructureLookup = { componentId: number; position: StructurePosition; component: LookupResult | null };
@@ -522,7 +523,16 @@ export function LookupApp() {
               : `SudachiDict Core ${releaseConfig.dictionaryVersion}`
         }</span>
         <span>バイナリ辞書をWeb Worker内で検索</span>
-        <a className="footer-link" href="/notices/">辞書のライセンス情報</a>
+        <span className="footer-links">
+          <a className="footer-link" href="/notices/">辞書のライセンス情報</a>
+          <a
+            className="footer-link"
+            href={SOURCE_REPOSITORY_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="GitHubリポジトリ（新しいタブで開きます）"
+          >GitHub</a>
+        </span>
       </footer>
     </div>
   );
