@@ -38,12 +38,12 @@ function datasetForEdition(value) {
       version: 2,
     };
   }
-  const name = `${value}-20260428-v8`;
+  const name = `${value}-20260428-v9`;
   return {
     source: resolve(root, "public/data/releases", name),
     destination: resolve(outputDirectory, "data/releases", name),
     manifest: `data/releases/${name}/manifest.json`,
-    version: 8,
+    version: 9,
   };
 }
 
@@ -88,6 +88,7 @@ async function validateDeployment(selectedDataset) {
     ? [manifest.entriesFile, manifest.indexFile]
     : [
         manifest.bootstrapFile,
+        manifest.posTableFile,
         ...manifest.searchShards.map((shard) => shard.file),
         ...manifest.records.files,
       ];

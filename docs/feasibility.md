@@ -145,9 +145,10 @@ Before publishing these artifacts, the release pipeline must still measure:
 - Browser memory during a representative query session
 - Cache behavior and total request count for short prefixes
 
-The current v3 format deliberately favors a simple, testable encoding. String
-and POS interning should be evaluated only if hosted transfer or browser-memory
-measurements show that the additional decoder complexity is worthwhile.
+The v3 format deliberately favored a simple, testable encoding. Format v9 now
+uses Sudachi's existing 16-bit POS IDs and a shared compressed POS table after
+hosted measurements showed that repeated POS strings were a material part of
+record storage.
 
 Format v4 retains that simple layout while replacing Structure and A/B word-ID
 arrays with one-byte cumulative code-point boundaries. This reduces Core record

@@ -7,11 +7,11 @@ const root = resolve(import.meta.dirname, "../..");
 const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v8`;
+const dataset = `${release}-v9`;
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 8) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== 9) throw new Error("Unexpected web format version");
 if (manifest.splitEncoding !== "u8-code-point-boundaries") {
   throw new Error("Unexpected split encoding");
 }
@@ -21,6 +21,15 @@ if (manifest.headwordFilter !== "dictionary-form-word-id") {
 if (manifest.kanaRanking !== "literal-script-tiebreak") {
   throw new Error("Unexpected kana ranking");
 }
+if (manifest.posEncoding !== "sudachi-u16") throw new Error("Unexpected POS encoding");
+if (manifest.posCompression !== "gzip") throw new Error("Unexpected POS compression");
+const posFile = await readFile(resolve(directory, manifest.posTableFile));
+if (posFile.byteLength !== manifest.posTableBytes) throw new Error("POS byte count does not match");
+const posDecoded = gunzipSync(posFile);
+if (posDecoded.byteLength !== manifest.posTableDecodedBytes) {
+  throw new Error("Decoded POS byte count does not match");
+}
+const posIds = validatePosTable(posDecoded, manifest.posCount);
 if (manifest.searchableEntries + manifest.filteredInflectionEntries !== manifest.entries) {
   throw new Error("Headword counts do not cover every source record");
 }
@@ -41,12 +50,12 @@ if (bootstrapDecoded.byteLength > manifest.bootstrapBudgetBytes) {
 }
 if (
   bootstrapDecoded.toString("utf8", 0, 4) !== "SDBP" ||
-  bootstrapDecoded.readUInt16LE(4) !== 8 ||
+  bootstrapDecoded.readUInt16LE(4) !== 9 ||
   bootstrapDecoded.readUInt32LE(6) !== manifest.bootstrapPrefixes
 ) {
   throw new Error("Invalid bootstrap header");
 }
-validateBootstrap(bootstrapDecoded, manifest);
+validateBootstrap(bootstrapDecoded, manifest, posIds);
 
 let aliasCount = 0;
 let previousLower = "";
@@ -54,7 +63,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 8 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== 9 || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -64,11 +73,11 @@ if (aliasCount !== manifest.aliases) throw new Error("Search shards do not conta
 
 let entryCount = 0;
 for (const file of manifest.records.files) {
-  entryCount += await validateRecordShard(resolve(directory, file), entryCount);
+  entryCount += await validateRecordShard(resolve(directory, file), entryCount, posIds);
 }
 if (entryCount !== manifest.entries) throw new Error("Record shards do not contain every entry");
 
-const totalFiles = manifest.searchShards.length + manifest.records.files.length + 2;
+const totalFiles = manifest.searchShards.length + manifest.records.files.length + 3;
 console.log(
   `Validated ${dataset}: ${manifest.searchableEntries} searchable entries, ` +
   `${manifest.aliases} aliases, ` +
@@ -92,7 +101,7 @@ async function readHeader(path) {
   }
 }
 
-function validateBootstrap(bytes, manifest) {
+function validateBootstrap(bytes, manifest, posIds) {
   const count = bytes.readUInt32LE(6);
   let offset = 10;
   let previousPrefix = "";
@@ -141,7 +150,9 @@ function validateBootstrap(bytes, manifest) {
     readString(); // reading
     readString(); // normalized form
     readString(); // dictionary form
-    readString(); // part of speech
+    const posId = bytes.readUInt16LE(offset);
+    offset += 2;
+    if (!posIds.has(posId)) throw new Error(`Unknown bootstrap POS ID ${posId}`);
     const surfaceLength = Array.from(surface).length;
     for (let split = 0; split < 3; split += 1) {
       const boundaryCount = bytes.readUInt8(offset);
@@ -168,7 +179,7 @@ function validateBootstrap(bytes, manifest) {
   if (offset !== bytes.length) throw new Error("Trailing bytes in bootstrap index");
 }
 
-async function validateRecordShard(path, firstExpectedId) {
+async function validateRecordShard(path, firstExpectedId, posIds) {
   const bytes = await readFile(path);
   let offset = 0;
   const magic = bytes.toString("utf8", offset, offset + 4);
@@ -177,7 +188,7 @@ async function validateRecordShard(path, firstExpectedId) {
   offset += 2;
   const count = bytes.readUInt32LE(offset);
   offset += 4;
-  if (magic !== "SDRE" || version !== 8) throw new Error(`Invalid record shard header: ${path}`);
+  if (magic !== "SDRE" || version !== 9) throw new Error(`Invalid record shard header: ${path}`);
 
   const readString = () => {
     const length = bytes.readUInt16LE(offset);
@@ -209,7 +220,9 @@ async function validateRecordShard(path, firstExpectedId) {
     readString(); // reading
     readString(); // normalized form
     readString(); // dictionary form
-    readString(); // part of speech
+    const posId = bytes.readUInt16LE(offset);
+    offset += 2;
+    if (!posIds.has(posId)) throw new Error(`Unknown POS ID ${posId} in ${path}`);
     const surfaceLength = Array.from(surface).length;
     readBoundaries(surfaceLength);
     readBoundaries(surfaceLength);
@@ -217,4 +230,26 @@ async function validateRecordShard(path, firstExpectedId) {
   }
   if (offset !== bytes.length) throw new Error(`Trailing bytes in record shard: ${path}`);
   return count;
+}
+
+function validatePosTable(bytes, expectedCount) {
+  if (
+    bytes.toString("utf8", 0, 4) !== "SDPO" ||
+    bytes.readUInt16LE(4) !== 9 ||
+    bytes.readUInt32LE(6) !== expectedCount
+  ) {
+    throw new Error("Invalid POS table header");
+  }
+  let offset = 10;
+  const ids = new Set();
+  for (let index = 0; index < expectedCount; index += 1) {
+    const id = bytes.readUInt16LE(offset);
+    offset += 2;
+    if (ids.has(id)) throw new Error(`Duplicate POS ID ${id}`);
+    ids.add(id);
+    const length = bytes.readUInt16LE(offset);
+    offset += 2 + length;
+  }
+  if (offset !== bytes.length) throw new Error("Trailing bytes in POS table");
+  return ids;
 }

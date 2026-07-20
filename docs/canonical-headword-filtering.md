@@ -2,7 +2,7 @@
 
 ## Status
 
-Stage 1 is implemented in browser-data format v5 and retained through v8 for both
+Stage 1 is implemented in browser-data format v5 and retained through v9 for both
 pinned Core and Full editions. Search aliases and bootstrap results refer only
 to canonical dictionary-form identities. The neutral export and browser record
 shards still retain every source record. Stage 2 record compaction remains
@@ -86,7 +86,7 @@ headword matched, but filtering does not depend on exposing that metadata.
 
 ## Staged implementation
 
-### Stage 1: filter search aliases (implemented in v5 through v8)
+### Stage 1: filter search aliases (implemented in v5 through v9)
 
 - Preserve every record in the neutral export and browser record shards.
 - Add and validate the upstream dictionary-form word ID.
@@ -107,7 +107,7 @@ After Stage 1 behavior is accepted:
 - Rewrite search postings to those IDs.
 - Retain a release report mapping browser IDs to pinned Sudachi word IDs.
 
-Formats v5 through v8 retain v4's surface-boundary representation, which makes this
+Formats v5 through v9 retain v4's surface-boundary representation, which makes this
 easier: Structure, A, and B display data no longer require component record IDs
 to remain present in the browser corpus.
 
@@ -173,6 +173,16 @@ Core emits 3,832 bootstrap keys and 38,144 embedded records in 856,126
 transferred bytes; Full emits 3,841 keys and 38,260 records in 866,314 bytes.
 For paired queries such as `い`/`イ`, `あい`/`アイ`, and `あま`/`アマ`, the
 otherwise equal surface result matching the typed script ranks first.
+
+Format v9 replaces the repeated POS display string in every record with the
+original Sudachi `u16` POS ID and one shared compressed table of 1,558 used POS
+values. The table transfers in 10,587 bytes for both editions. Core record data
+falls from 232,461,377 to 144,421,683 bytes and its complete dictionary falls
+by 88,025,223 bytes (21.1%). Full record data falls from 427,577,506 to
+276,828,309 bytes and its complete dictionary falls by 150,713,267 bytes
+(18.5%). A 2.5 MiB decoded bootstrap budget keeps combined bootstrap-plus-POS
+startup transfer within 1.7% of Core v8 and 4.1% of Full v8 while covering more
+prefix keys than v8.
 
 ## Product effect
 

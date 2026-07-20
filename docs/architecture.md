@@ -153,9 +153,12 @@ lengths before emitting one-byte browser boundaries. Component labels are
 reconstructed from the parent surface, preserving contextual capitalization and
 orthography without fetching referenced records.
 
-Part-of-speech arrays and other repeated values should use interned IDs. Empty
-or identical forms may be represented as references to `surface` rather than
-duplicate strings.
+Format v9 preserves Sudachi's original `u16` POS ID in every browser record.
+One gzip-compressed `pos.bin.gz` table maps the used IDs to their full joined
+component strings. The Worker loads it alongside the bootstrap and resolves
+record IDs to shared JavaScript strings, so the UI contract remains unchanged.
+Empty or identical forms may still be represented as references to `surface`
+rather than duplicate strings in a future format.
 
 ## 6. Query normalization
 
@@ -196,13 +199,13 @@ The application will therefore use two tiers:
    beyond the bootstrap results for a broad query.
 
 Format v7 introduced bootstrap selection from generated cost statistics rather
-than query length, and format v8 retains that model. A prefix is eligible either
-when it matches at least 500 aliases
+than query length, and formats v8 and v9 retain that model. A prefix is eligible
+either when it matches at least 500 aliases
 and routes at least 192 KiB of search data, or when its initial results require
 at least 1 MiB of record shards. The generator explores branches down to 100
 matching aliases so record-scattered queries such as `あきの` can qualify.
 Eligible prefixes are prioritized by the combined search- and record-shard
-transfer they avoid, then encoded under a hard 4 MiB decoded budget. Records
+transfer they avoid, then encoded under the current hard 2.5 MiB decoded budget. Records
 shared by multiple prefixes are stored only once. The bootstrap itself is gzip
 compressed for transfer and decompressed in the Worker. Hiragana and katakana
 spellings have distinct bootstrap keys and rankings. Both bootstrap and live
@@ -350,19 +353,25 @@ The manifest should contain at least:
 
 ```json
 {
-  "formatVersion": 8,
+  "formatVersion": 9,
   "dictionary": {
     "edition": "core",
     "version": "20260428"
   },
   "generatorVersion": "0.1.0",
   "bootstrapFile": "bootstrap.bin.gz",
+  "posTableFile": "pos.bin.gz",
+  "posCount": 1558,
+  "posTableBytes": 10587,
+  "posTableDecodedBytes": 113109,
+  "posCompression": "gzip",
+  "posEncoding": "sudachi-u16",
   "kanaRanking": "literal-script-tiebreak",
-  "bootstrapPrefixes": 3832,
-  "bootstrapRecords": 38144,
-  "bootstrapBytes": 856126,
-  "bootstrapDecodedBytes": 4194261,
-  "bootstrapBudgetBytes": 4194304,
+  "bootstrapPrefixes": 4071,
+  "bootstrapRecords": 39963,
+  "bootstrapBytes": 859839,
+  "bootstrapDecodedBytes": 2621427,
+  "bootstrapBudgetBytes": 2621440,
   "bootstrapCompression": "gzip",
   "routing": "prefix routing data",
   "recordPartitioning": "record partition metadata"

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     cmp::Ordering,
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{hash_map::Entry as HashEntry, HashMap, HashSet, VecDeque},
     env,
     error::Error,
     fs::{self, File},
@@ -14,11 +14,11 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 8;
+const FORMAT_VERSION: u16 = 9;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const INITIAL_RESULTS: usize = 20;
-const BOOTSTRAP_BUDGET_BYTES: usize = 4 * 1024 * 1024;
+const BOOTSTRAP_BUDGET_BYTES: usize = 5 * 1024 * 1024 / 2;
 const BOOTSTRAP_MIN_SEARCH_BYTES: u64 = 192 * 1024;
 const BOOTSTRAP_MIN_BROAD_ALIASES: usize = 500;
 const BOOTSTRAP_MIN_DESCENT_ALIASES: usize = 100;
@@ -32,7 +32,7 @@ struct SourceEntry {
     normalized_form: String,
     dictionary_form: String,
     dictionary_form_word_id: i32,
-    pos: Vec<String>,
+    pos_id: u16,
     cost: i16,
     a_split: Vec<u32>,
     b_split: Vec<u32>,
@@ -45,12 +45,15 @@ struct SurfaceEntry {
     surface: String,
     dictionary_form: String,
     dictionary_form_word_id: i32,
+    pos_id: u16,
+    pos: Vec<String>,
 }
 
 struct SourceIndex {
     surfaces: Vec<String>,
     dictionary_form_word_ids: Vec<i32>,
     searchable_entries: u64,
+    pos_entries: Vec<(u16, String)>,
 }
 
 #[derive(Clone)]
@@ -120,6 +123,12 @@ struct Manifest {
     searchable_entries: u64,
     filtered_inflection_entries: u64,
     aliases: usize,
+    pos_table_file: String,
+    pos_count: usize,
+    pos_table_bytes: u64,
+    pos_table_decoded_bytes: u64,
+    pos_compression: &'static str,
+    pos_encoding: &'static str,
     bootstrap_file: String,
     bootstrap_prefixes: usize,
     bootstrap_records: usize,
@@ -318,7 +327,7 @@ fn write_record(
     writer.string(&entry.reading_form)?;
     writer.string(&entry.normalized_form)?;
     writer.string(&entry.dictionary_form)?;
-    writer.string(&entry.pos.join(" · "))?;
+    writer.u16(entry.pos_id);
     writer.boundaries(&split_boundaries(entry, &entry.a_split, surfaces, "A")?)?;
     writer.boundaries(&split_boundaries(entry, &entry.b_split, surfaces, "B")?)?;
     writer.boundaries(&split_boundaries(
@@ -347,6 +356,19 @@ fn write_alias_file(path: &Path, aliases: &[Alias]) -> Result<u64, Box<dyn Error
         writer.u16(alias.surface_length);
     }
     write_file(path, &writer.bytes)
+}
+
+fn write_pos_table(path: &Path, entries: &[(u16, String)]) -> Result<(u64, u64), Box<dyn Error>> {
+    let mut writer = BinaryWriter::new(b"SDPO", entries.len() as u32);
+    for (id, value) in entries {
+        writer.u16(*id);
+        writer.string(value)?;
+    }
+    let decoded_bytes = writer.bytes.len() as u64;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&writer.bytes)?;
+    let compressed = encoder.finish()?;
+    Ok((write_file(path, &compressed)?, decoded_bytes))
 }
 
 fn bootstrap_entry_bytes(entry: &BootstrapEntry) -> usize {
@@ -634,6 +656,7 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
     let mut surfaces = Vec::new();
     let mut dictionary_form_word_ids = Vec::new();
     let mut dictionary_forms = Vec::new();
+    let mut pos_by_id = HashMap::new();
     for line in source_reader(input)?.lines() {
         let entry: SurfaceEntry = serde_json::from_str(&line?)?;
         if entry.word_id as usize != surfaces.len() {
@@ -647,6 +670,16 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
         surfaces.push(entry.surface);
         dictionary_forms.push(entry.dictionary_form);
         dictionary_form_word_ids.push(entry.dictionary_form_word_id);
+        let pos = entry.pos.join(" · ");
+        match pos_by_id.entry(entry.pos_id) {
+            HashEntry::Occupied(existing) if existing.get() != &pos => {
+                return Err(format!("POS ID {} has inconsistent components", entry.pos_id).into());
+            }
+            HashEntry::Occupied(_) => {}
+            HashEntry::Vacant(entry) => {
+                entry.insert(pos);
+            }
+        }
     }
 
     let mut searchable_entries = 0_u64;
@@ -680,10 +713,13 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
             .into());
         }
     }
+    let mut pos_entries: Vec<(u16, String)> = pos_by_id.into_iter().collect();
+    pos_entries.sort_unstable_by_key(|(id, _)| *id);
     Ok(SourceIndex {
         surfaces,
         dictionary_form_word_ids,
         searchable_entries,
+        pos_entries,
     })
 }
 
@@ -751,6 +787,10 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         left.key == right.key && left.id == right.id && left.kind == right.kind
     });
 
+    let pos_table_file = "pos.bin.gz".to_owned();
+    let (pos_table_bytes, pos_table_decoded_bytes) =
+        write_pos_table(&output.join(&pos_table_file), &source.pos_entries)?;
+
     let mut search_shards = Vec::with_capacity(aliases.len().div_ceil(MAX_ALIASES_PER_SHARD));
     let mut search_sizes = Vec::with_capacity(search_shards.capacity());
     for (index, values) in aliases.chunks(MAX_ALIASES_PER_SHARD).enumerate() {
@@ -787,6 +827,12 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         searchable_entries: source.searchable_entries,
         filtered_inflection_entries: entries - source.searchable_entries,
         aliases: aliases.len(),
+        pos_table_file,
+        pos_count: source.pos_entries.len(),
+        pos_table_bytes,
+        pos_table_decoded_bytes,
+        pos_compression: "gzip",
+        pos_encoding: "sudachi-u16",
         bootstrap_file,
         bootstrap_prefixes: bootstrap.entries.len(),
         bootstrap_records: bootstrap.record_ids.len(),
@@ -900,7 +946,7 @@ mod tests {
             normalized_form: String::new(),
             dictionary_form: String::new(),
             dictionary_form_word_id: -1,
-            pos: Vec::new(),
+            pos_id: 0,
             cost: 0,
             a_split: split,
             b_split: Vec::new(),

@@ -247,7 +247,7 @@ Normal frontend checks and previews continue to use the sample fixture. Core
 and Full are selected explicitly; the application's local Full-to-Core-to-sample
 fallback must not be used as deployment selection logic.
 
-The explicit manual Full-preview command validates the pinned v8 data, builds
+The explicit manual Full-preview command validates the pinned v9 data, builds
 an output containing only Full, and deploys it to the `full-staging` branch:
 
 ```sh
@@ -408,17 +408,19 @@ Before publishing Full, record:
 - CI generation and assembly duration
 - Retention and rollback cost
 
-The Full v8 preview candidate establishes this assembly baseline:
+The Full v9 preview candidate establishes this assembly baseline:
 
-| Measurement | Full 20260428 v8 |
+| Measurement | Full 20260428 v9 |
 | --- | ---: |
 | Searchable entries | 2,452,463 |
 | Search aliases | 12,257,080 |
-| Bootstrap keys | 3,841 |
-| Bootstrap transfer | 866,314 B |
-| Pages artifact | 779.2 MiB |
-| Pages files | 3,871 |
-| Largest file | 846.0 KiB |
+| POS values | 1,558 |
+| Compressed POS table | 10,587 B |
+| Bootstrap keys | 4,142 |
+| Bootstrap transfer | 891,484 B |
+| Pages artifact | 635.4 MiB |
+| Pages files | 3,872 |
+| Largest file | 870.6 KiB |
 
 Cold and warm latency, peak Worker memory, and mobile-network behavior are
 deployment measurements rather than assembly properties. Record those against

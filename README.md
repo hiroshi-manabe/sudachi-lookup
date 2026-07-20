@@ -11,14 +11,15 @@ domain. It requires no application server, search API, or hosted database.
 ## Project status
 
 The local vertical slice, complete SudachiDict Core/Full exporter, and
-range-sharded browser format are implemented. Format v8 publishes only
+range-sharded browser format are implemented. Format v9 publishes only
 canonical dictionary-form identities in search while retaining every source
 record for lossless navigation. It also includes a cost-driven bootstrap of
 precomputed initial results and their display records for expensive prefixes
-under a 4 MiB decoded budget. Hiragana and katakana queries have distinct
+under a 2.5 MiB decoded budget. Hiragana and katakana queries have distinct
 bootstrap rankings, and literal-script matches win otherwise equal ranking
-ties. The bootstrap is stored as gzip, keeping the Core transfer below 0.85
-MiB. It
+ties. Records preserve Sudachi's original 16-bit POS IDs and resolve them
+through one compressed shared table instead of repeating POS strings. The
+bootstrap is stored as gzip, keeping the Core transfer below 0.85 MiB. It
 inherits v4's eager one-byte boundaries for Structure and A/B segmentation.
 The interface supports navigable compound components, mode badges, and
 mode-specific expansion without loading component records. For queries outside
@@ -83,7 +84,7 @@ version, checksums, and applicable notices.
 
 The browser-data policy distinguishes dictionary headwords from Sudachi's
 internal conjugation-state records. The neutral export and browser record
-shards remain lossless, while formats v5 through v8 index only canonical headword results
+shards remain lossless, while formats v5 through v9 index only canonical headword results
 as described in
 [docs/canonical-headword-filtering.md](docs/canonical-headword-filtering.md).
 

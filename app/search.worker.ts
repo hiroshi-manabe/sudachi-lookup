@@ -26,7 +26,7 @@ type SearchShard = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 8;
+  formatVersion: 9;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
   kanaRanking: "literal-script-tiebreak";
@@ -35,6 +35,10 @@ type DictionaryManifest = {
   searchableEntries: number;
   filteredInflectionEntries: number;
   aliases: number;
+  posTableFile: string;
+  posCount: number;
+  posEncoding: "sudachi-u16";
+  posCompression: "gzip";
   bootstrapFile: string;
   bootstrapPrefixes: number;
   bootstrapRecords: number;
@@ -52,8 +56,8 @@ type DictionaryManifest = {
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v8",
-  "/data/releases/core-20260428-v8",
+  "/data/releases/full-20260428-v9",
+  "/data/releases/core-20260428-v9",
 ];
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
@@ -79,6 +83,7 @@ let mode: "sample" | "sharded" = "sample";
 let dictionaryBase = "";
 let dictionaryManifest: DictionaryManifest | null = null;
 let sampleAliases: Alias[] = [];
+let posTable = new Map<number, string>();
 let bootstrapResults = new Map<string, number[]>();
 let entries = new Map<number, Entry>();
 let searchCache = new Map<string, Promise<Alias[]>>();
@@ -153,23 +158,30 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 8 ||
+      dictionaryManifest.formatVersion !== 9 ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
       dictionaryManifest.headwordFilter !== "dictionary-form-word-id" ||
       dictionaryManifest.kanaRanking !== "literal-script-tiebreak" ||
+      dictionaryManifest.posEncoding !== "sudachi-u16" ||
+      dictionaryManifest.posCompression !== "gzip" ||
       dictionaryManifest.bootstrapCompression !== "gzip"
     ) {
       throw new Error(`Unsupported dictionary format: ${dictionaryManifest.formatVersion}`);
     }
     dictionaryBase = base;
     mode = "sharded";
-    const bootstrapResponse = await fetch(`${base}/${dictionaryManifest.bootstrapFile}`);
+    const [bootstrapResponse, posResponse] = await Promise.all([
+      fetch(`${base}/${dictionaryManifest.bootstrapFile}`),
+      fetch(`${base}/${dictionaryManifest.posTableFile}`),
+    ]);
     if (!bootstrapResponse.ok) throw new Error("Dictionary bootstrap index could not be loaded");
-    if (!bootstrapResponse.body || typeof DecompressionStream === "undefined") {
-      throw new Error("This browser cannot decompress the dictionary bootstrap");
-    }
-    const decompressed = bootstrapResponse.body.pipeThrough(new DecompressionStream("gzip"));
-    const bootstrap = decodeBootstrap(await new Response(decompressed).arrayBuffer());
+    if (!posResponse.ok) throw new Error("Dictionary POS table could not be loaded");
+    const [bootstrapBuffer, posBuffer] = await Promise.all([
+      decompressGzip(bootstrapResponse, "dictionary bootstrap"),
+      decompressGzip(posResponse, "dictionary POS table"),
+    ]);
+    posTable = decodePosTable(posBuffer, dictionaryManifest.posCount);
+    const bootstrap = decodeBootstrap(bootstrapBuffer);
     bootstrapResults = bootstrap.results;
     entries = bootstrap.entries;
     return;
@@ -192,6 +204,14 @@ async function loadData() {
 
 function isJsonResponse(response: Response) {
   return response.headers.get("content-type")?.toLowerCase().includes("application/json") ?? false;
+}
+
+async function decompressGzip(response: Response, label: string) {
+  if (!response.body || typeof DecompressionStream === "undefined") {
+    throw new Error(`This browser cannot decompress the ${label}`);
+  }
+  const decompressed = response.body.pipeThrough(new DecompressionStream("gzip"));
+  return new Response(decompressed).arrayBuffer();
 }
 
 async function startSearch(requestId: number, rawQuery: string) {
@@ -346,7 +366,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Search shard could not be loaded: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 8);
+      return decodeAliases(await response.arrayBuffer(), 9);
     });
     searchCache.set(file, promise);
   }
@@ -361,7 +381,7 @@ function loadRecordShard(index: number) {
     if (!file) return Promise.reject(new Error(`Missing record shard ${index}`));
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`Record shard could not be loaded: ${file}`);
-      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 8)) {
+      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 9)) {
         entries.set(id, entry);
       }
     });
@@ -478,7 +498,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 8) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 9) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -492,7 +512,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 8) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 8) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 9) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -513,7 +533,7 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 8) {
 function decodeBootstrap(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDBP");
-  reader.version(8);
+  reader.version(9);
   const count = reader.u32();
   const results = new Map<string, number[]>();
   for (let index = 0; index < count; index += 1) {
@@ -529,7 +549,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   const recordCount = reader.u32();
   const bootstrapEntries = new Map<number, Entry>();
   for (let index = 0; index < recordCount; index += 1) {
-    const [id, entry] = decodeEntry(reader, 8);
+    const [id, entry] = decodeEntry(reader, 9);
     bootstrapEntries.set(id, entry);
   }
   reader.done();
@@ -541,14 +561,14 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   return { results, entries: bootstrapEntries };
 }
 
-function decodeEntry(reader: BinaryReader, version: 2 | 8): [number, Entry] {
+function decodeEntry(reader: BinaryReader, version: 2 | 9): [number, Entry] {
   const id = reader.u32();
   const cost = version === 2 ? reader.u16() : reader.i16();
   const surface = reader.string();
   const readingForm = reader.string();
   const normalizedForm = reader.string();
   const dictionaryForm = reader.string();
-  const pos = reader.string();
+  const pos = version === 2 ? reader.string() : resolvePos(reader.u16());
   const aBoundaries = reader.boundaries();
   const bBoundaries = reader.boundaries();
   const structureBoundaries = reader.boundaries();
@@ -556,6 +576,28 @@ function decodeEntry(reader: BinaryReader, version: 2 | 8): [number, Entry] {
     id, cost, surface, readingForm, normalizedForm, dictionaryForm, pos,
     aBoundaries, bBoundaries, structureBoundaries,
   }];
+}
+
+function decodePosTable(buffer: ArrayBuffer, expectedCount: number) {
+  const reader = new BinaryReader(buffer);
+  reader.magic("SDPO");
+  reader.version(9);
+  const count = reader.u32();
+  if (count !== expectedCount) throw new Error("Dictionary POS count does not match manifest");
+  const decoded = new Map<number, string>();
+  for (let index = 0; index < count; index += 1) {
+    const id = reader.u16();
+    if (decoded.has(id)) throw new Error(`Duplicate dictionary POS ID: ${id}`);
+    decoded.set(id, reader.string());
+  }
+  reader.done();
+  return decoded;
+}
+
+function resolvePos(id: number) {
+  const pos = posTable.get(id);
+  if (pos === undefined) throw new Error(`Missing dictionary POS ID: ${id}`);
+  return pos;
 }
 
 class BinaryReader {
