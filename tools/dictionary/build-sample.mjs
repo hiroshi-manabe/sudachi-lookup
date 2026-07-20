@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { gzipSync } from "node:zlib";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePath = resolve(root, "tools/dictionary/fixtures/sample.json");
@@ -12,6 +13,9 @@ export async function buildSample() {
   const aliases = buildAliases(entries);
   const entriesBuffer = encodeEntries(entries);
   const indexBuffer = encodeAliases(aliases);
+  const structureBuffer = encodeStructureMatches(entries);
+  const compressedStructureBuffer = gzipSync(structureBuffer);
+  const structurePostings = buildStructurePostings(entries);
   const manifest = {
     formatVersion: 2,
     dataset: "sample",
@@ -19,16 +23,36 @@ export async function buildSample() {
     aliases: aliases.length,
     entriesFile: "entries.bin",
     indexFile: "index.bin",
+    structureMatches: {
+      compression: "gzip",
+      identity: "sample-entry-id",
+      positions: ["first", "last"],
+      components: structurePostings.length,
+      firstRelationships: structurePostings.reduce((count, item) => count + item.first.length, 0),
+      lastRelationships: structurePostings.reduce((count, item) => count + item.last.length, 0),
+      shards: [{
+        lower: structurePostings[0].id,
+        upper: structurePostings.at(-1).id,
+        file: "structure/00000.bin.gz",
+        components: structurePostings.length,
+        firstRelationships: structurePostings.reduce((count, item) => count + item.first.length, 0),
+        lastRelationships: structurePostings.reduce((count, item) => count + item.last.length, 0),
+        bytes: compressedStructureBuffer.length,
+        decodedBytes: structureBuffer.length,
+      }],
+    },
   };
 
   await mkdir(outputDirectory, { recursive: true });
+  await mkdir(resolve(outputDirectory, "structure"), { recursive: true });
   await Promise.all([
     writeFile(resolve(outputDirectory, manifest.entriesFile), entriesBuffer),
     writeFile(resolve(outputDirectory, manifest.indexFile), indexBuffer),
+    writeFile(resolve(outputDirectory, manifest.structureMatches.shards[0].file), compressedStructureBuffer),
     writeFile(resolve(outputDirectory, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`),
   ]);
 
-  return { entries, aliases, manifest, entriesBuffer, indexBuffer };
+  return { entries, aliases, manifest, entriesBuffer, indexBuffer, structureBuffer };
 }
 
 export function encodeEntries(entries) {
@@ -49,7 +73,7 @@ export function encodeEntries(entries) {
     writer.boundaries(splitBoundaries(entry.surface, entry.bSplit, surfaces));
     writer.boundaries(splitBoundaries(
       entry.surface,
-      entry.bSplit.length ? entry.bSplit : entry.aSplit,
+      entry.structure ?? (entry.bSplit.length ? entry.bSplit : entry.aSplit),
       surfaces,
     ));
   }
@@ -65,6 +89,48 @@ export function encodeAliases(aliases) {
     writer.string(alias.key);
     writer.u32(alias.id);
     writer.u8(alias.kind);
+  }
+  return writer.finish();
+}
+
+export function buildStructurePostings(entries) {
+  const byId = new Map(entries.map((entry) => [entry.id, entry]));
+  const postings = new Map();
+  for (const entry of entries) {
+    const structure = entry.structure ?? (entry.bSplit.length ? entry.bSplit : entry.aSplit);
+    if (structure.length < 2) continue;
+    const first = postings.get(structure[0]) ?? { id: structure[0], first: [], last: [] };
+    first.first.push(entry.id);
+    postings.set(first.id, first);
+    const lastId = structure.at(-1);
+    const last = postings.get(lastId) ?? { id: lastId, first: [], last: [] };
+    last.last.push(entry.id);
+    postings.set(last.id, last);
+  }
+  const rank = (left, right) => {
+    const a = byId.get(left);
+    const b = byId.get(right);
+    return a.rank - b.rank || [...a.surface].length - [...b.surface].length || left - right;
+  };
+  return [...postings.values()].map((item) => ({
+    ...item,
+    first: [...new Set(item.first)].sort(rank),
+    last: [...new Set(item.last)].sort(rank),
+  })).sort((left, right) => left.id - right.id);
+}
+
+export function encodeStructureMatches(entries) {
+  const postings = buildStructurePostings(entries);
+  const writer = new BinaryWriter();
+  writer.magic("SDSM");
+  writer.u16(10);
+  writer.u32(postings.length);
+  for (const item of postings) {
+    writer.u32(item.id);
+    writer.u32(item.first.length);
+    writer.u32(item.last.length);
+    for (const id of item.first) writer.u32(id);
+    for (const id of item.last) writer.u32(id);
   }
   return writer.finish();
 }
@@ -116,7 +182,7 @@ function validateEntries(entries) {
   const ids = new Set(entries.map((entry) => entry.id));
   if (ids.size !== entries.length) throw new Error("Fixture entry IDs must be unique");
   for (const entry of entries) {
-    for (const splitId of [...entry.aSplit, ...entry.bSplit]) {
+    for (const splitId of [...entry.aSplit, ...entry.bSplit, ...(entry.structure ?? [])]) {
       if (!ids.has(splitId)) throw new Error(`Entry ${entry.id} references missing split ${splitId}`);
     }
   }

@@ -7,11 +7,11 @@ const root = resolve(import.meta.dirname, "../..");
 const edition = process.env.SUDACHI_EDITION ?? "core";
 const version = process.env.SUDACHI_VERSION ?? "20260428";
 const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v9`;
+const dataset = `${release}-v10`;
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 9) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== 10) throw new Error("Unexpected web format version");
 if (manifest.splitEncoding !== "u8-code-point-boundaries") {
   throw new Error("Unexpected split encoding");
 }
@@ -50,7 +50,7 @@ if (bootstrapDecoded.byteLength > manifest.bootstrapBudgetBytes) {
 }
 if (
   bootstrapDecoded.toString("utf8", 0, 4) !== "SDBP" ||
-  bootstrapDecoded.readUInt16LE(4) !== 9 ||
+  bootstrapDecoded.readUInt16LE(4) !== 10 ||
   bootstrapDecoded.readUInt32LE(6) !== manifest.bootstrapPrefixes
 ) {
   throw new Error("Invalid bootstrap header");
@@ -63,7 +63,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 9 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== 10 || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -77,13 +77,85 @@ for (const file of manifest.records.files) {
 }
 if (entryCount !== manifest.entries) throw new Error("Record shards do not contain every entry");
 
-const totalFiles = manifest.searchShards.length + manifest.records.files.length + 3;
+const structureTotals = await validateStructureMatches(manifest.structureMatches, manifest.entries);
+if (
+  structureTotals.components !== manifest.structureMatches.components ||
+  structureTotals.first !== manifest.structureMatches.firstRelationships ||
+  structureTotals.last !== manifest.structureMatches.lastRelationships
+) throw new Error("Structure Match totals do not match the manifest");
+
+const totalFiles = manifest.searchShards.length + manifest.records.files.length +
+  manifest.structureMatches.shards.length + 3;
 console.log(
   `Validated ${dataset}: ${manifest.searchableEntries} searchable entries, ` +
   `${manifest.aliases} aliases, ` +
   `${manifest.bootstrapPrefixes} bootstrap prefixes in ${manifest.bootstrapBytes} bytes, ` +
+  `${structureTotals.components} Structure Match components, ` +
   `${totalFiles} dictionary files.`,
 );
+
+async function validateStructureMatches(structure, entryCount) {
+  if (structure.compression !== "gzip") throw new Error("Unexpected Structure Match compression");
+  if (structure.identity !== "canonical-dictionary-form-word-id") {
+    throw new Error("Unexpected Structure Match identity");
+  }
+  if (structure.positions.join(",") !== "first,last") throw new Error("Unexpected Structure Match positions");
+  let previousUpper = -1;
+  let components = 0;
+  let first = 0;
+  let last = 0;
+  for (const shard of structure.shards) {
+    if (shard.lower <= previousUpper || shard.lower > shard.upper) {
+      throw new Error(`Invalid Structure Match range: ${shard.file}`);
+    }
+    const compressed = await readFile(resolve(directory, shard.file));
+    if (compressed.byteLength !== shard.bytes) throw new Error(`Structure Match byte count differs: ${shard.file}`);
+    const bytes = gunzipSync(compressed);
+    if (bytes.byteLength !== shard.decodedBytes) throw new Error(`Decoded Structure Match size differs: ${shard.file}`);
+    if (bytes.toString("utf8", 0, 4) !== "SDSM" || bytes.readUInt16LE(4) !== 10) {
+      throw new Error(`Invalid Structure Match header: ${shard.file}`);
+    }
+    const count = bytes.readUInt32LE(6);
+    if (count !== shard.components) throw new Error(`Structure Match component count differs: ${shard.file}`);
+    let offset = 10;
+    let previousComponent = -1;
+    let shardFirst = 0;
+    let shardLast = 0;
+    for (let index = 0; index < count; index += 1) {
+      const component = bytes.readUInt32LE(offset);
+      const firstCount = bytes.readUInt32LE(offset + 4);
+      const lastCount = bytes.readUInt32LE(offset + 8);
+      offset += 12;
+      if (component <= previousComponent || component >= entryCount) throw new Error(`Invalid Structure Match component ${component}`);
+      const seenFirst = new Set();
+      const seenLast = new Set();
+      for (let relation = 0; relation < firstCount; relation += 1) {
+        const parent = bytes.readUInt32LE(offset);
+        offset += 4;
+        if (parent >= entryCount || seenFirst.has(parent)) throw new Error(`Invalid first Structure Match parent ${parent}`);
+        seenFirst.add(parent);
+      }
+      for (let relation = 0; relation < lastCount; relation += 1) {
+        const parent = bytes.readUInt32LE(offset);
+        offset += 4;
+        if (parent >= entryCount || seenLast.has(parent)) throw new Error(`Invalid last Structure Match parent ${parent}`);
+        seenLast.add(parent);
+      }
+      shardFirst += firstCount;
+      shardLast += lastCount;
+      previousComponent = component;
+    }
+    if (offset !== bytes.length) throw new Error(`Trailing Structure Match bytes: ${shard.file}`);
+    if (previousComponent !== shard.upper || shardFirst !== shard.firstRelationships || shardLast !== shard.lastRelationships) {
+      throw new Error(`Structure Match shard metadata differs: ${shard.file}`);
+    }
+    components += count;
+    first += shardFirst;
+    last += shardLast;
+    previousUpper = shard.upper;
+  }
+  return { components, first, last };
+}
 
 async function readHeader(path) {
   const file = await open(path, "r");
@@ -188,7 +260,7 @@ async function validateRecordShard(path, firstExpectedId, posIds) {
   offset += 2;
   const count = bytes.readUInt32LE(offset);
   offset += 4;
-  if (magic !== "SDRE" || version !== 9) throw new Error(`Invalid record shard header: ${path}`);
+  if (magic !== "SDRE" || version !== 10) throw new Error(`Invalid record shard header: ${path}`);
 
   const readString = () => {
     const length = bytes.readUInt16LE(offset);
@@ -235,7 +307,7 @@ async function validateRecordShard(path, firstExpectedId, posIds) {
 function validatePosTable(bytes, expectedCount) {
   if (
     bytes.toString("utf8", 0, 4) !== "SDPO" ||
-    bytes.readUInt16LE(4) !== 9 ||
+    bytes.readUInt16LE(4) !== 10 ||
     bytes.readUInt32LE(6) !== expectedCount
   ) {
     throw new Error("Invalid POS table header");

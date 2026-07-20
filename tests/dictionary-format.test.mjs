@@ -11,6 +11,7 @@ test("builds a deterministic binary sample with valid split references", async (
   assert.ok(first.aliases.length > first.entries.length);
   assert.deepEqual(first.entriesBuffer, second.entriesBuffer);
   assert.deepEqual(first.indexBuffer, second.indexBuffer);
+  assert.deepEqual(first.structureBuffer, second.structureBuffer);
 
   const electionCommittee = first.entries.find((entry) => entry.surface === "選挙管理委員会");
   assert.deepEqual(electionCommittee.aSplit, [1, 2, 3, 4]);
@@ -22,6 +23,11 @@ test("builds a deterministic binary sample with valid split references", async (
   const index = await readFile("public/data/sample/index.bin");
   assert.equal(index.subarray(0, 4).toString("utf8"), "SDIX");
   assert.equal(index.readUInt16LE(4), 2);
+  const structure = Buffer.from(first.structureBuffer);
+  assert.equal(structure.subarray(0, 4).toString("utf8"), "SDSM");
+  assert.equal(structure.readUInt16LE(4), 10);
+  assert.ok(first.manifest.structureMatches.firstRelationships > 0);
+  assert.ok(first.manifest.structureMatches.lastRelationships > 0);
 });
 
 test("indexes normalized, dictionary, and both kana reading forms", async () => {

@@ -2,7 +2,7 @@
 
 ## Status
 
-Stage 1 is implemented in browser-data format v5 and retained through v9 for both
+Stage 1 is implemented in browser-data format v5 and retained through v10 for both
 pinned Core and Full editions. Search aliases and bootstrap results refer only
 to canonical dictionary-form identities. The neutral export and browser record
 shards still retain every source record. Stage 2 record compaction remains
@@ -86,7 +86,7 @@ headword matched, but filtering does not depend on exposing that metadata.
 
 ## Staged implementation
 
-### Stage 1: filter search aliases (implemented in v5 through v9)
+### Stage 1: filter search aliases (implemented in v5 through v10)
 
 - Preserve every record in the neutral export and browser record shards.
 - Add and validate the upstream dictionary-form word ID.
@@ -107,7 +107,7 @@ After Stage 1 behavior is accepted:
 - Rewrite search postings to those IDs.
 - Retain a release report mapping browser IDs to pinned Sudachi word IDs.
 
-Formats v5 through v9 retain v4's surface-boundary representation, which makes this
+Formats v5 through v10 retain v4's surface-boundary representation, which makes this
 easier: Structure, A, and B display data no longer require component record IDs
 to remain present in the browser corpus.
 

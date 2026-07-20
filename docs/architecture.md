@@ -153,7 +153,7 @@ lengths before emitting one-byte browser boundaries. Component labels are
 reconstructed from the parent surface, preserving contextual capitalization and
 orthography without fetching referenced records.
 
-Format v9 preserves Sudachi's original `u16` POS ID in every browser record.
+Formats v9 and v10 preserve Sudachi's original `u16` POS ID in every browser record.
 One gzip-compressed `pos.bin.gz` table maps the used IDs to their full joined
 component strings. The Worker loads it alongside the bootstrap and resolves
 record IDs to shared JavaScript strings, so the UI contract remains unchanged.
@@ -199,7 +199,7 @@ The application will therefore use two tiers:
    beyond the bootstrap results for a broad query.
 
 Format v7 introduced bootstrap selection from generated cost statistics rather
-than query length, and formats v8 and v9 retain that model. A prefix is eligible
+than query length, and formats v8 through v10 retain that model. A prefix is eligible
 either when it matches at least 500 aliases
 and routes at least 192 KiB of search data, or when its initial results require
 at least 1 MiB of record shards. The generator explores branches down to 100
@@ -353,7 +353,7 @@ The manifest should contain at least:
 
 ```json
 {
-  "formatVersion": 9,
+  "formatVersion": 10,
   "dictionary": {
     "edition": "core",
     "version": "20260428"
@@ -373,6 +373,12 @@ The manifest should contain at least:
   "bootstrapDecodedBytes": 2621427,
   "bootstrapBudgetBytes": 2621440,
   "bootstrapCompression": "gzip",
+  "structureMatches": {
+    "compression": "gzip",
+    "identity": "canonical-dictionary-form-word-id",
+    "positions": ["first", "last"],
+    "shards": "component-ID range routing data"
+  },
   "routing": "prefix routing data",
   "recordPartitioning": "record partition metadata"
 }

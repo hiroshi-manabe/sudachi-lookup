@@ -14,7 +14,7 @@ use std::{
 };
 use unicode_normalization::UnicodeNormalization;
 
-const FORMAT_VERSION: u16 = 9;
+const FORMAT_VERSION: u16 = 10;
 const RECORD_SPAN: u32 = 2_048;
 const MAX_ALIASES_PER_SHARD: usize = 5_000;
 const INITIAL_RESULTS: usize = 20;
@@ -23,6 +23,7 @@ const BOOTSTRAP_MIN_SEARCH_BYTES: u64 = 192 * 1024;
 const BOOTSTRAP_MIN_BROAD_ALIASES: usize = 500;
 const BOOTSTRAP_MIN_DESCENT_ALIASES: usize = 100;
 const BOOTSTRAP_MIN_RECORD_BYTES: u64 = 1024 * 1024;
+const STRUCTURE_SHARD_TARGET_BYTES: usize = 128 * 1024;
 
 #[derive(Deserialize)]
 struct SourceEntry {
@@ -47,6 +48,7 @@ struct SurfaceEntry {
     dictionary_form_word_id: i32,
     pos_id: u16,
     pos: Vec<String>,
+    cost: i16,
 }
 
 struct SourceIndex {
@@ -54,6 +56,14 @@ struct SourceIndex {
     dictionary_form_word_ids: Vec<i32>,
     searchable_entries: u64,
     pos_entries: Vec<(u16, String)>,
+    costs: Vec<i16>,
+    surface_lengths: Vec<u16>,
+}
+
+#[derive(Default)]
+struct StructurePostings {
+    first: Vec<u32>,
+    last: Vec<u32>,
 }
 
 #[derive(Clone)]
@@ -106,6 +116,31 @@ struct RecordManifest {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct StructureShard {
+    lower: u32,
+    upper: u32,
+    file: String,
+    components: usize,
+    first_relationships: usize,
+    last_relationships: usize,
+    bytes: u64,
+    decoded_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StructureManifest {
+    compression: &'static str,
+    identity: &'static str,
+    positions: [&'static str; 2],
+    components: usize,
+    first_relationships: usize,
+    last_relationships: usize,
+    shards: Vec<StructureShard>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SizeStats {
     minimum: u64,
     median: u64,
@@ -143,6 +178,7 @@ struct Manifest {
     bootstrap_min_record_bytes: u64,
     search_shards: Vec<SearchShard>,
     records: RecordManifest,
+    structure_matches: StructureManifest,
     search_size: SizeStats,
     record_size: SizeStats,
     split_encoding: &'static str,
@@ -369,6 +405,91 @@ fn write_pos_table(path: &Path, entries: &[(u16, String)]) -> Result<(u64, u64),
     encoder.write_all(&writer.bytes)?;
     let compressed = encoder.finish()?;
     Ok((write_file(path, &compressed)?, decoded_bytes))
+}
+
+fn write_structure_shard(
+    path: &Path,
+    postings: &[(u32, StructurePostings)],
+) -> Result<(u64, u64), Box<dyn Error>> {
+    let mut writer = BinaryWriter::new(b"SDSM", postings.len() as u32);
+    for (component_id, values) in postings {
+        writer.u32(*component_id);
+        writer.u32(values.first.len() as u32);
+        writer.u32(values.last.len() as u32);
+        for parent_id in &values.first {
+            writer.u32(*parent_id);
+        }
+        for parent_id in &values.last {
+            writer.u32(*parent_id);
+        }
+    }
+    let decoded_bytes = writer.bytes.len() as u64;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(&writer.bytes)?;
+    let compressed = encoder.finish()?;
+    Ok((write_file(path, &compressed)?, decoded_bytes))
+}
+
+fn build_structure_shards(
+    output: &Path,
+    postings: HashMap<u32, StructurePostings>,
+    source: &SourceIndex,
+) -> Result<StructureManifest, Box<dyn Error>> {
+    let mut postings: Vec<_> = postings.into_iter().collect();
+    for (_, values) in &mut postings {
+        let rank = |left: &u32, right: &u32| {
+            source.costs[*left as usize]
+                .cmp(&source.costs[*right as usize])
+                .then(source.surface_lengths[*left as usize].cmp(&source.surface_lengths[*right as usize]))
+                .then(left.cmp(right))
+        };
+        values.first.sort_unstable_by(rank);
+        values.first.dedup();
+        values.last.sort_unstable_by(rank);
+        values.last.dedup();
+    }
+    postings.sort_unstable_by_key(|(component_id, _)| *component_id);
+
+    fs::create_dir_all(output.join("structure"))?;
+    let mut shards = Vec::new();
+    let mut start = 0;
+    while start < postings.len() {
+        let mut end = start;
+        let mut decoded = 10_usize;
+        while end < postings.len() {
+            let values = &postings[end].1;
+            let bytes = 12 + 4 * (values.first.len() + values.last.len());
+            if end > start && decoded + bytes > STRUCTURE_SHARD_TARGET_BYTES {
+                break;
+            }
+            decoded += bytes;
+            end += 1;
+        }
+        let values = &postings[start..end];
+        let index = shards.len();
+        let file = format!("structure/{index:05}.bin.gz");
+        let (bytes, decoded_bytes) = write_structure_shard(&output.join(&file), values)?;
+        shards.push(StructureShard {
+            lower: values.first().unwrap().0,
+            upper: values.last().unwrap().0,
+            file,
+            components: values.len(),
+            first_relationships: values.iter().map(|(_, item)| item.first.len()).sum(),
+            last_relationships: values.iter().map(|(_, item)| item.last.len()).sum(),
+            bytes,
+            decoded_bytes,
+        });
+        start = end;
+    }
+    Ok(StructureManifest {
+        compression: "gzip",
+        identity: "canonical-dictionary-form-word-id",
+        positions: ["first", "last"],
+        components: postings.len(),
+        first_relationships: shards.iter().map(|shard| shard.first_relationships).sum(),
+        last_relationships: shards.iter().map(|shard| shard.last_relationships).sum(),
+        shards,
+    })
 }
 
 fn bootstrap_entry_bytes(entry: &BootstrapEntry) -> usize {
@@ -657,6 +778,8 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
     let mut dictionary_form_word_ids = Vec::new();
     let mut dictionary_forms = Vec::new();
     let mut pos_by_id = HashMap::new();
+    let mut costs = Vec::new();
+    let mut surface_lengths = Vec::new();
     for line in source_reader(input)?.lines() {
         let entry: SurfaceEntry = serde_json::from_str(&line?)?;
         if entry.word_id as usize != surfaces.len() {
@@ -667,6 +790,8 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
             )
             .into());
         }
+        surface_lengths.push(entry.surface.chars().count().min(u16::MAX as usize) as u16);
+        costs.push(entry.cost);
         surfaces.push(entry.surface);
         dictionary_forms.push(entry.dictionary_form);
         dictionary_form_word_ids.push(entry.dictionary_form_word_id);
@@ -720,6 +845,8 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
         dictionary_form_word_ids,
         searchable_entries,
         pos_entries,
+        costs,
+        surface_lengths,
     })
 }
 
@@ -733,6 +860,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
     let mut record_sizes = Vec::new();
     let mut record_entry_sizes = Vec::new();
     let mut record_entries = Vec::with_capacity(RECORD_SPAN as usize);
+    let mut structure_postings: HashMap<u32, StructurePostings> = HashMap::new();
 
     for line in source_reader(input)?.lines() {
         let entry: SourceEntry = serde_json::from_str(&line?)?;
@@ -756,6 +884,14 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             || entry.dictionary_form_word_id == entry.word_id as i32
         {
             add_aliases(&mut aliases, &entry);
+            if let (Some(first), Some(last)) = (entry.word_structure.first(), entry.word_structure.last()) {
+                let canonicalize = |id: u32| {
+                    let target = source.dictionary_form_word_ids[id as usize];
+                    if target == -1 || target == id as i32 { id } else { target as u32 }
+                };
+                structure_postings.entry(canonicalize(*first)).or_default().first.push(entry.word_id);
+                structure_postings.entry(canonicalize(*last)).or_default().last.push(entry.word_id);
+            }
         }
         record_entries.push(entry);
         entries += 1;
@@ -819,6 +955,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         return Err("bootstrap size calculation does not match encoded file".into());
     }
     let bootstrap_bytes = fs::metadata(output.join(&bootstrap_file))?.len();
+    let structure_matches = build_structure_shards(output, structure_postings, &source)?;
 
     let manifest = Manifest {
         format_version: FORMAT_VERSION,
@@ -850,6 +987,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             span: RECORD_SPAN,
             files: record_files,
         },
+        structure_matches,
         search_size: stats(search_sizes),
         record_size: stats(record_sizes),
         split_encoding: "u8-code-point-boundaries",

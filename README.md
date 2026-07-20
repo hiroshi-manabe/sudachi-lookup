@@ -11,7 +11,7 @@ domain. It requires no application server, search API, or hosted database.
 ## Project status
 
 The local vertical slice, complete SudachiDict Core/Full exporter, and
-range-sharded browser format are implemented. Format v9 publishes only
+range-sharded browser format are implemented. Format v10 publishes only
 canonical dictionary-form identities in search while retaining every source
 record for lossless navigation. It also includes a cost-driven bootstrap of
 precomputed initial results and their display records for expensive prefixes
@@ -21,7 +21,11 @@ ties. Records preserve Sudachi's original 16-bit POS IDs and resolve them
 through one compressed shared table instead of repeating POS strings. The
 bootstrap is stored as gzip, keeping the Core transfer below 0.85 MiB. It
 inherits v4's eager one-byte boundaries for Structure and A/B segmentation.
-The interface supports navigable compound components, mode badges, and
+Format v10 also adds a lazy, position-aware Structure Match index: any result
+can become an identity token that finds canonical words whose direct Sudachi
+Structure begins or ends with that entry. Core adds 50 compressed shards
+(3,293,246 bytes); Full adds 128 (8,875,874 bytes), with no added startup
+transfer. The interface supports navigable compound components, mode badges, and
 mode-specific expansion without loading component records. Its visible copy,
 loading and error states, accessibility labels, and supporting static pages are
 Japanese; the product name, A/B/C badges, and Core/Full edition names remain
@@ -39,6 +43,7 @@ The proposed first release will provide:
 - Responsive, incremental results driven by a Web Worker
 - Progressive result loading for broad prefixes
 - Navigable Structure components and expandable A/B/C segmentation
+- Lazy Structure Match lookup by direct first or last component identity
 - A versioned, reproducible SudachiDict Core data build
 - A fully static Cloudflare Pages deployment
 
@@ -57,6 +62,7 @@ Offline extractor and index builder
         +-- manifest and bootstrap suggestions
         +-- prefix-search shards
         +-- entry-detail shards with Structure and A/B boundaries
+        +-- lazy first/last Structure Match posting shards
         |
         v
 Cloudflare Pages
@@ -87,7 +93,7 @@ version, checksums, and applicable notices.
 
 The browser-data policy distinguishes dictionary headwords from Sudachi's
 internal conjugation-state records. The neutral export and browser record
-shards remain lossless, while formats v5 through v9 index only canonical headword results
+shards remain lossless, while formats v5 through v10 index only canonical headword results
 as described in
 [docs/canonical-headword-filtering.md](docs/canonical-headword-filtering.md).
 

@@ -286,7 +286,24 @@ Application tests should cover:
 
 ## Implementation phases
 
-### Phase 1: format experiment
+Implemented in browser-data format v10 on 2026-07-20. The generated index uses
+canonical component and parent IDs, offline parent ranking, gzip compression,
+and roughly 128 KiB decoded range shards. It remains completely lazy: neither
+the manifest nor startup bootstrap embeds posting data.
+
+Measured release output:
+
+| Measurement | Core 20260428 v10 | Full 20260428 v10 |
+| --- | ---: | ---: |
+| Canonical components | 145,242 | 393,411 |
+| First relationships | 573,277 | 1,487,960 |
+| Last relationships | 573,277 | 1,487,960 |
+| Shards | 50 | 128 |
+| Decoded bytes | 6,329,620 | 16,625,892 |
+| Compressed bytes | 3,293,246 | 8,875,874 |
+| Largest compressed shard | 82,340 B | 83,790 B |
+
+### Phase 1: format experiment (complete)
 
 - Add measurement code to the dictionary builder without changing v9 output.
 - Compare source-ID order, absolute varints, and pre-ranked signed-delta
@@ -297,14 +314,14 @@ Application tests should cover:
 - Freeze a new browser-data format version only after these results pass the
   8 MiB Full budget.
 
-### Phase 2: generated data and validation
+### Phase 2: generated data and validation (complete)
 
 - Emit reverse-index shards and manifest routing metadata.
 - Extend the deterministic sample fixture with relationship cases.
 - Add structural and ranking validation for Core and Full.
 - Keep all reverse assets lazy and absent from bootstrap startup traffic.
 
-### Phase 3: Worker relationship session
+### Phase 3: Worker relationship session (complete)
 
 - Add the distinct request and session type.
 - Route and cache reverse shards.
@@ -312,7 +329,7 @@ Application tests should cover:
   cancellation.
 - Add unit and integration fixtures before changing the visible interface.
 
-### Phase 4: token-mode interface
+### Phase 4: token-mode interface (complete)
 
 - Add the grouped result-level `構造一致: 先頭 / 末尾` action with complete
   accessible labels.
@@ -326,7 +343,7 @@ Application tests should cover:
 - Verify responsive and accessible interaction without weakening ordinary
   typing or IME behavior.
 
-### Phase 5: staged release
+### Phase 5: staged release (in progress)
 
 - Exercise the sample locally and through its Pages preview.
 - Deploy and measure Core staging, including cold reverse-shard and record-shard

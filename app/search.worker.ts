@@ -25,8 +25,29 @@ type SearchShard = {
   bytes: number;
 };
 
+type StructurePosition = "first" | "last";
+type StructureShard = {
+  lower: number;
+  upper: number;
+  file: string;
+  components: number;
+  firstRelationships: number;
+  lastRelationships: number;
+  bytes: number;
+  decodedBytes: number;
+};
+type StructureManifest = {
+  compression: "gzip";
+  identity: string;
+  positions: ["first", "last"];
+  components: number;
+  firstRelationships: number;
+  lastRelationships: number;
+  shards: StructureShard[];
+};
+
 type DictionaryManifest = {
-  formatVersion: 9;
+  formatVersion: 10;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
   kanaRanking: "literal-script-tiebreak";
@@ -53,11 +74,12 @@ type DictionaryManifest = {
   bootstrapMinRecordBytes: number;
   searchShards: SearchShard[];
   records: { span: number; files: string[] };
+  structureMatches: StructureManifest;
 };
 
 const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v9",
-  "/data/releases/core-20260428-v9",
+  "/data/releases/full-20260428-v10",
+  "/data/releases/core-20260428-v10",
 ];
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
@@ -77,6 +99,7 @@ type SearchSession = {
   sentIds: Set<number>;
   remainingIds: number[];
   deferredFullSearch: boolean;
+  kind: "text" | "structure";
 };
 
 let mode: "sample" | "sharded" = "sample";
@@ -91,6 +114,8 @@ let recordCache = new Map<number, Promise<void>>();
 let loading: Promise<void> | null = null;
 let activeRequestId = 0;
 let activeSession: SearchSession | null = null;
+let structureManifest: StructureManifest | null = null;
+let structureCache = new Map<string, Promise<Map<number, { first: number[]; last: number[] }>>>();
 
 self.onmessage = async (event: MessageEvent) => {
   const message = event.data;
@@ -122,20 +147,45 @@ self.onmessage = async (event: MessageEvent) => {
       });
       await streamResults(page.ids, message.requestId, message.query);
     }
+    if (message.type === "structure-search") {
+      activeRequestId = message.requestId;
+      activeSession = null;
+      await ensureLoaded();
+      if (message.requestId !== activeRequestId) return;
+      const page = await startStructureSearch(message.requestId, message.componentId, message.position);
+      if (message.requestId !== activeRequestId) return;
+      activeSession = page.session;
+      const component = toResult(await loadEntry(message.componentId));
+      if (message.requestId !== activeRequestId) return;
+      self.postMessage({
+        type: "structure-component",
+        requestId: message.requestId,
+        component,
+      });
+      self.postMessage({
+        type: "result-slots",
+        requestId: message.requestId,
+        query: "",
+        ids: page.ids,
+        append: false,
+        hasMore: page.hasMore,
+      });
+      await streamResults(page.ids, message.requestId, "");
+    }
     if (message.type === "more") {
       const session = activeSession;
-      if (!session || message.requestId !== activeRequestId || session.query !== message.query) return;
+      if (!session || message.requestId !== activeRequestId) return;
       const page = await continueSearch(session);
       if (message.requestId !== activeRequestId) return;
       self.postMessage({
         type: "result-slots",
         requestId: message.requestId,
-        query: message.query,
+        query: session.kind === "text" ? session.query : "",
         ids: page.ids,
         append: true,
         hasMore: page.hasMore,
       });
-      await streamResults(page.ids, message.requestId, message.query);
+      await streamResults(page.ids, message.requestId, session.kind === "text" ? session.query : "");
     }
   } catch (error) {
     if (message.requestId && message.requestId !== activeRequestId) return;
@@ -158,7 +208,7 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 9 ||
+      dictionaryManifest.formatVersion !== 10 ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
       dictionaryManifest.headwordFilter !== "dictionary-form-word-id" ||
       dictionaryManifest.kanaRanking !== "literal-script-tiebreak" ||
@@ -169,6 +219,7 @@ async function loadData() {
       throw new Error(`対応していない辞書形式です: ${dictionaryManifest.formatVersion}`);
     }
     dictionaryBase = base;
+    structureManifest = dictionaryManifest.structureMatches;
     mode = "sharded";
     const [bootstrapResponse, posResponse] = await Promise.all([
       fetch(`${base}/${dictionaryManifest.bootstrapFile}`),
@@ -193,6 +244,8 @@ async function loadData() {
     throw new Error("辞書マニフェストがJSONではありません");
   }
   const manifest = await manifestResponse.json();
+  structureManifest = manifest.structureMatches;
+  dictionaryBase = "/data/sample";
   const [entriesResponse, indexResponse] = await Promise.all([
     fetch(`/data/sample/${manifest.entriesFile}`),
     fetch(`/data/sample/${manifest.indexFile}`),
@@ -218,7 +271,7 @@ async function startSearch(requestId: number, rawQuery: string) {
   const query = normalize(rawQuery);
   if (!query) {
     const session: SearchSession = {
-      requestId, query: rawQuery, sentIds: new Set(), remainingIds: [], deferredFullSearch: false,
+      requestId, query: rawQuery, sentIds: new Set(), remainingIds: [], deferredFullSearch: false, kind: "text",
     };
     return { ids: [], hasMore: false, session };
   }
@@ -245,12 +298,38 @@ async function startSearch(requestId: number, rawQuery: string) {
     sentIds: new Set(selectedIds),
     remainingIds: rankedIds.slice(INITIAL_RESULTS),
     deferredFullSearch,
+    kind: "text",
   };
   return {
     ids: selectedIds,
     hasMore: session.remainingIds.length > 0 || session.deferredFullSearch,
     session,
   };
+}
+
+async function startStructureSearch(
+  requestId: number,
+  componentId: number,
+  position: StructurePosition,
+) {
+  const manifest = structureManifest;
+  if (!manifest) throw new Error("構造一致データがありません");
+  const shard = manifest.shards.find((item) => componentId >= item.lower && componentId <= item.upper);
+  let rankedIds: number[] = [];
+  if (shard) {
+    const postings = await loadStructureShard(shard.file);
+    rankedIds = postings.get(componentId)?.[position] ?? [];
+  }
+  const selectedIds = rankedIds.slice(0, INITIAL_RESULTS);
+  const session: SearchSession = {
+    requestId,
+    query: "",
+    sentIds: new Set(selectedIds),
+    remainingIds: rankedIds.slice(INITIAL_RESULTS),
+    deferredFullSearch: false,
+    kind: "structure",
+  };
+  return { ids: selectedIds, hasMore: session.remainingIds.length > 0, session };
 }
 
 async function continueSearch(session: SearchSession) {
@@ -366,11 +445,37 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`検索データを読み込めませんでした: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 9);
+      return decodeAliases(await response.arrayBuffer(), 10);
     });
     searchCache.set(file, promise);
   }
   return promise;
+}
+
+async function loadStructureShard(file: string) {
+  let promise = structureCache.get(file);
+  if (!promise) {
+    promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
+      if (!response.ok) throw new Error(`構造一致データを読み込めませんでした: ${file}`);
+      return decodeStructureMatches(await decompressGzip(response, "構造一致データ"));
+    });
+    structureCache.set(file, promise);
+  }
+  return promise;
+}
+
+async function loadEntry(id: number) {
+  const present = entries.get(id);
+  if (present) return present;
+  if (mode === "sample") throw new Error(`辞書データが見つかりません: ${id}`);
+  const manifest = dictionaryManifest!;
+  if (!Number.isInteger(id) || id < 0 || id >= manifest.entries) {
+    throw new Error(`辞書データが見つかりません: ${id}`);
+  }
+  await loadRecordShard(Math.floor(id / manifest.records.span));
+  const loaded = entries.get(id);
+  if (!loaded) throw new Error(`辞書データが見つかりません: ${id}`);
+  return loaded;
 }
 
 function loadRecordShard(index: number) {
@@ -381,7 +486,7 @@ function loadRecordShard(index: number) {
     if (!file) return Promise.reject(new Error(`辞書データが見つかりません: ${index}`));
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`辞書データを読み込めませんでした: ${file}`);
-      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 9)) {
+      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 10)) {
         entries.set(id, entry);
       }
     });
@@ -498,7 +603,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 9) {
+function decodeEntries(buffer: ArrayBuffer, version: 2 | 10) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -512,7 +617,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 9) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 9) {
+function decodeAliases(buffer: ArrayBuffer, version: 2 | 10) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -530,10 +635,29 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 9) {
   return decoded;
 }
 
+function decodeStructureMatches(buffer: ArrayBuffer) {
+  const reader = new BinaryReader(buffer);
+  reader.magic("SDSM");
+  reader.version(10);
+  const count = reader.u32();
+  const decoded = new Map<number, { first: number[]; last: number[] }>();
+  for (let index = 0; index < count; index += 1) {
+    const componentId = reader.u32();
+    const firstCount = reader.u32();
+    const lastCount = reader.u32();
+    const first = Array.from({ length: firstCount }, () => reader.u32());
+    const last = Array.from({ length: lastCount }, () => reader.u32());
+    if (decoded.has(componentId)) throw new Error(`構造一致IDが重複しています: ${componentId}`);
+    decoded.set(componentId, { first, last });
+  }
+  reader.done();
+  return decoded;
+}
+
 function decodeBootstrap(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDBP");
-  reader.version(9);
+  reader.version(10);
   const count = reader.u32();
   const results = new Map<string, number[]>();
   for (let index = 0; index < count; index += 1) {
@@ -549,7 +673,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   const recordCount = reader.u32();
   const bootstrapEntries = new Map<number, Entry>();
   for (let index = 0; index < recordCount; index += 1) {
-    const [id, entry] = decodeEntry(reader, 9);
+    const [id, entry] = decodeEntry(reader, 10);
     bootstrapEntries.set(id, entry);
   }
   reader.done();
@@ -561,7 +685,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   return { results, entries: bootstrapEntries };
 }
 
-function decodeEntry(reader: BinaryReader, version: 2 | 9): [number, Entry] {
+function decodeEntry(reader: BinaryReader, version: 2 | 10): [number, Entry] {
   const id = reader.u32();
   const cost = version === 2 ? reader.u16() : reader.i16();
   const surface = reader.string();
@@ -581,7 +705,7 @@ function decodeEntry(reader: BinaryReader, version: 2 | 9): [number, Entry] {
 function decodePosTable(buffer: ArrayBuffer, expectedCount: number) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDPO");
-  reader.version(9);
+  reader.version(10);
   const count = reader.u32();
   if (count !== expectedCount) throw new Error("辞書の品詞数がマニフェストと一致しません");
   const decoded = new Map<number, string>();

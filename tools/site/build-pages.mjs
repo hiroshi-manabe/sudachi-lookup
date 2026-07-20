@@ -38,12 +38,12 @@ function datasetForEdition(value) {
       version: 2,
     };
   }
-  const name = `${value}-20260428-v9`;
+  const name = `${value}-20260428-v10`;
   return {
     source: resolve(root, "public/data/releases", name),
     destination: resolve(outputDirectory, "data/releases", name),
     manifest: `data/releases/${name}/manifest.json`,
-    version: 9,
+    version: 10,
   };
 }
 
@@ -85,12 +85,13 @@ async function validateDeployment(selectedDataset) {
 
   const manifestDirectory = resolve(manifestPath, "..");
   const references = selectedDataset.version === 2
-    ? [manifest.entriesFile, manifest.indexFile]
+    ? [manifest.entriesFile, manifest.indexFile, ...manifest.structureMatches.shards.map((shard) => shard.file)]
     : [
         manifest.bootstrapFile,
         manifest.posTableFile,
         ...manifest.searchShards.map((shard) => shard.file),
         ...manifest.records.files,
+        ...manifest.structureMatches.shards.map((shard) => shard.file),
       ];
   await Promise.all(references.map(async (file) => {
     const filePath = resolve(manifestDirectory, file);

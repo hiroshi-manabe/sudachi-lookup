@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
+import type { LookupResult, StructurePosition, UnitMode, WorkerResponse } from "./lookup-types";
 
 const INITIAL_QUERY = "";
 const INITIAL_RESULT_SLOTS = 20;
 const WEB_SEARCH_URL = "https://www.google.com/search?q=";
 type SearchState = "loading" | "idle" | "searching" | "hydrating" | "settled" | "error";
 type ResultSlot = { id: number | null; result: LookupResult | null };
+type StructureLookup = { componentId: number; position: StructurePosition; component: LookupResult | null };
 
 export function LookupApp() {
   const workerRef = useRef<Worker | null>(null);
@@ -17,7 +18,9 @@ export function LookupApp() {
   const inputRef = useRef<HTMLInputElement>(null);
   const composingRef = useRef(false);
   const queryRef = useRef(INITIAL_QUERY);
+  const structureRef = useRef<StructureLookup | null>(null);
   const [query, setQuery] = useState(INITIAL_QUERY);
+  const [structureLookup, setStructureLookup] = useState<StructureLookup | null>(null);
   const [resultSlots, setResultSlots] = useState<ResultSlot[]>([]);
   const [status, setStatus] = useState("辞書を読み込んでいます…");
   const [dataset, setDataset] = useState("sample");
@@ -29,9 +32,12 @@ export function LookupApp() {
   const [searchState, setSearchState] = useState<SearchState>("loading");
 
   useEffect(() => {
-    const initialQuery = queryFromLocation();
+    const initialMode = lookupFromLocation();
+    const initialQuery = initialMode.query;
     queryRef.current = initialQuery;
+    structureRef.current = initialMode.structure;
     setQuery(initialQuery);
+    setStructureLookup(initialMode.structure);
 
     const worker = new Worker(new URL("./search.worker.ts", import.meta.url), {
       type: "module",
@@ -43,7 +49,8 @@ export function LookupApp() {
       if (message.type === "ready") {
         setDataset(message.dataset);
         setStatus(`${message.entries.toLocaleString("ja-JP")}語 · ${message.aliases.toLocaleString("ja-JP")}検索形`);
-        search(queryRef.current, worker);
+        if (structureRef.current) searchStructure(structureRef.current, worker);
+        else search(queryRef.current, worker);
       } else if (message.type === "result-slots") {
         if (message.requestId !== requestIdRef.current) return;
         setResultSlots((current) => message.append
@@ -65,6 +72,14 @@ export function LookupApp() {
           setAutomaticLoadBlocked(false);
           setSearchState("settled");
         }
+      } else if (message.type === "structure-component") {
+        if (message.requestId !== requestIdRef.current) return;
+        setStructureLookup((current) => {
+          if (!current || current.componentId !== message.component.id) return current;
+          const next = { ...current, component: message.component };
+          structureRef.current = next;
+          return next;
+        });
       } else {
         if (message.requestId && message.requestId !== requestIdRef.current) return;
         loadingMoreRequestRef.current = false;
@@ -76,10 +91,13 @@ export function LookupApp() {
     };
 
     const onPopState = () => {
-      const nextQuery = queryFromLocation();
-      queryRef.current = nextQuery;
-      setQuery(nextQuery);
-      search(nextQuery, worker);
+      const next = lookupFromLocation();
+      queryRef.current = next.query;
+      structureRef.current = next.structure;
+      setQuery(next.query);
+      setStructureLookup(next.structure);
+      if (next.structure) searchStructure(next.structure, worker);
+      else search(next.query, worker);
     };
 
     window.addEventListener("popstate", onPopState);
@@ -107,8 +125,11 @@ export function LookupApp() {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key === "k") {
         event.preventDefault();
-        inputRef.current?.focus();
-        inputRef.current?.select();
+        if (structureRef.current) clearStructureLookup();
+        else {
+          inputRef.current?.focus();
+          inputRef.current?.select();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -134,6 +155,25 @@ export function LookupApp() {
     worker.postMessage({ type: "search", requestId, query: nextQuery });
   }
 
+  function searchStructure(next: StructureLookup, worker = workerRef.current) {
+    if (!worker) return;
+    const requestId = ++requestIdRef.current;
+    loadingMoreRequestRef.current = false;
+    setResultSlots(createPendingSlots(INITIAL_RESULT_SLOTS));
+    setActiveIndex(0);
+    setExpandedId(null);
+    setHasMore(false);
+    setLoadingMore(false);
+    setAutomaticLoadBlocked(false);
+    setSearchState("searching");
+    worker.postMessage({
+      type: "structure-search",
+      requestId,
+      componentId: next.componentId,
+      position: next.position,
+    });
+  }
+
   function requestMore() {
     const worker = workerRef.current;
     if (!worker || !hasMore || loadingMoreRequestRef.current) return;
@@ -148,6 +188,8 @@ export function LookupApp() {
   }
 
   function updateQuery(nextQuery: string) {
+    structureRef.current = null;
+    setStructureLookup(null);
     queryRef.current = nextQuery;
     setQuery(nextQuery);
     if (composingRef.current) return;
@@ -156,12 +198,44 @@ export function LookupApp() {
   }
 
   function navigateToComponent(nextQuery: string) {
+    structureRef.current = null;
+    setStructureLookup(null);
     queryRef.current = nextQuery;
     setQuery(nextQuery);
     setExpandedId(null);
     updateQueryUrl(nextQuery, "push");
     search(nextQuery);
     inputRef.current?.focus();
+  }
+
+  function enterStructureLookup(result: LookupResult, position: StructurePosition) {
+    const next = { componentId: result.id, position, component: result };
+    structureRef.current = next;
+    setStructureLookup(next);
+    queryRef.current = "";
+    setQuery("");
+    updateStructureUrl(next, "push");
+    searchStructure(next);
+  }
+
+  function switchStructurePosition(position: StructurePosition) {
+    const current = structureRef.current;
+    if (!current || current.position === position) return;
+    const next = { ...current, position };
+    structureRef.current = next;
+    setStructureLookup(next);
+    updateStructureUrl(next, "replace");
+    searchStructure(next);
+  }
+
+  function clearStructureLookup() {
+    structureRef.current = null;
+    setStructureLookup(null);
+    queryRef.current = "";
+    setQuery("");
+    updateQueryUrl("", "replace");
+    search("");
+    requestAnimationFrame(() => inputRef.current?.focus());
   }
 
   function toggleResult(result: LookupResult) {
@@ -199,25 +273,51 @@ export function LookupApp() {
       </header>
 
       <section className="search-panel" aria-label="辞書検索">
-        <label className="search-label" htmlFor="lookup-query">Sudachi辞書を検索</label>
+        {structureLookup
+          ? <div className="search-label">構造一致</div>
+          : <label className="search-label" htmlFor="lookup-query">Sudachi辞書を検索</label>}
         <div className="search-row">
-          <input
-            ref={inputRef}
-            id="lookup-query"
-            className="search-input"
-            value={query}
-            placeholder="選挙管理委員会"
-            autoComplete="off"
-            spellCheck={false}
-            onChange={(event) => updateQuery(event.target.value)}
-            onCompositionStart={() => { composingRef.current = true; }}
-            onCompositionEnd={(event) => {
-              composingRef.current = false;
-              updateQuery(event.currentTarget.value);
-            }}
-            onKeyDown={handleInputKeyDown}
-            aria-controls="lookup-results"
-          />
+          {structureLookup ? (
+            <div
+              className="structure-control"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Backspace" || event.key === "Delete") {
+                  event.preventDefault();
+                  clearStructureLookup();
+                }
+              }}
+              aria-label="構造一致検索"
+              aria-controls="lookup-results"
+            >
+              <span className="structure-token" lang="ja">
+                <span>{structureLookup.component?.surface ?? "読み込み中…"}</span>
+                <button type="button" onClick={clearStructureLookup} aria-label="構造一致検索を解除">×</button>
+              </span>
+              <span className="structure-position" aria-label="構造の位置">
+                <button type="button" aria-pressed={structureLookup.position === "first"} onClick={() => switchStructurePosition("first")}>先頭</button>
+                <button type="button" aria-pressed={structureLookup.position === "last"} onClick={() => switchStructurePosition("last")}>末尾</button>
+              </span>
+            </div>
+          ) : (
+            <input
+              ref={inputRef}
+              id="lookup-query"
+              className="search-input"
+              value={query}
+              placeholder="選挙管理委員会"
+              autoComplete="off"
+              spellCheck={false}
+              onChange={(event) => updateQuery(event.target.value)}
+              onCompositionStart={() => { composingRef.current = true; }}
+              onCompositionEnd={(event) => {
+                composingRef.current = false;
+                updateQuery(event.currentTarget.value);
+              }}
+              onKeyDown={handleInputKeyDown}
+              aria-controls="lookup-results"
+            />
+          )}
           <kbd className="shortcut">⌘ K</kbd>
         </div>
         <div className="search-meta">
@@ -231,6 +331,11 @@ export function LookupApp() {
         aria-live="polite"
         aria-busy={searchState === "loading" || searchState === "searching" || searchState === "hydrating"}
       >
+        {structureLookup?.component ? (
+          <p className="sr-only">
+            「{structureLookup.component.surface}」を構造の{structureLookup.position === "first" ? "先頭" : "末尾"}に持つ語の検索結果
+          </p>
+        ) : null}
         <div className="results-header">
           <h2 className="results-title" id="results-heading">検索結果</h2>
           <span className="result-count">{
@@ -273,7 +378,7 @@ export function LookupApp() {
                       <ComponentSequence
                         segments={result.structure}
                         interactive={
-                          result.unit !== "A" || shouldNavigateToValue(query, result.surface)
+                          result.unit !== "A" || shouldNavigateToValue(structureLookup ? "" : query, result.surface)
                         }
                         onNavigate={navigateToComponent}
                       />
@@ -294,6 +399,21 @@ export function LookupApp() {
                           <span aria-hidden="true">↗</span>
                         </a>
                       </span>
+                      <span className="structure-match-actions">
+                        <span className="entry-subline-separator" aria-hidden="true">·</span>
+                        <span>構造一致:</span>
+                        <button
+                          type="button"
+                          aria-label={`「${result.surface}」を構造の先頭に持つ語を検索`}
+                          onClick={(event) => { event.stopPropagation(); enterStructureLookup(result, "first"); }}
+                        >先頭</button>
+                        <span aria-hidden="true">/</span>
+                        <button
+                          type="button"
+                          aria-label={`「${result.surface}」を構造の末尾に持つ語を検索`}
+                          onClick={(event) => { event.stopPropagation(); enterStructureLookup(result, "last"); }}
+                        >末尾</button>
+                      </span>
                     </div>
                   </div>
                   <div className="details">
@@ -303,7 +423,7 @@ export function LookupApp() {
                     </div>
                     <div className="form-line">
                       <span className="form-label">正規化形</span>
-                      {shouldNavigateToValue(query, result.normalizedForm) ? (
+                      {shouldNavigateToValue(structureLookup ? "" : query, result.normalizedForm) ? (
                         <button
                           type="button"
                           className="form-link"
@@ -354,7 +474,7 @@ export function LookupApp() {
                   ? "検索中…"
                   : searchState === "error"
                     ? "検索を利用できません。"
-                    : "一致する語がありません。"
+                    : structureLookup ? "一致する構造の語がありません。" : "一致する語がありません。"
             }</div>
           ) : null}
         </div>
@@ -510,15 +630,31 @@ function ComponentSequence({
   );
 }
 
-function queryFromLocation() {
-  return new URL(window.location.href).searchParams.get("q") || INITIAL_QUERY;
+function lookupFromLocation(): { query: string; structure: StructureLookup | null } {
+  const parameters = new URL(window.location.href).searchParams;
+  const position = parameters.get("structure");
+  const componentId = Number(parameters.get("component"));
+  if ((position === "first" || position === "last") && Number.isInteger(componentId) && componentId >= 0) {
+    return { query: "", structure: { componentId, position, component: null } };
+  }
+  return { query: parameters.get("q") || INITIAL_QUERY, structure: null };
 }
 
 function updateQueryUrl(query: string, mode: "push" | "replace") {
   const url = new URL(window.location.href);
   if (query) url.searchParams.set("q", query);
   else url.searchParams.delete("q");
+  url.searchParams.delete("structure");
+  url.searchParams.delete("component");
   window.history[`${mode}State`]({ query }, "", url);
+}
+
+function updateStructureUrl(lookup: StructureLookup, mode: "push" | "replace") {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("q");
+  url.searchParams.set("structure", lookup.position);
+  url.searchParams.set("component", String(lookup.componentId));
+  window.history[`${mode}State`]({ structure: lookup.position, component: lookup.componentId }, "", url);
 }
 
 function shouldNavigateToValue(query: string, value: string) {

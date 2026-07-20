@@ -4,5 +4,28 @@
   "entries": 29,
   "aliases": 145,
   "entriesFile": "entries.bin",
-  "indexFile": "index.bin"
+  "indexFile": "index.bin",
+  "structureMatches": {
+    "compression": "gzip",
+    "identity": "sample-entry-id",
+    "positions": [
+      "first",
+      "last"
+    ],
+    "components": 13,
+    "firstRelationships": 7,
+    "lastRelationships": 7,
+    "shards": [
+      {
+        "lower": 1,
+        "upper": 18,
+        "file": "structure/00000.bin.gz",
+        "components": 13,
+        "firstRelationships": 7,
+        "lastRelationships": 7,
+        "bytes": 98,
+        "decodedBytes": 222
+      }
+    ]
+  }
 }

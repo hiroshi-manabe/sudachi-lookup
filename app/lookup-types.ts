@@ -4,6 +4,7 @@ export type SplitView = {
 };
 
 export type UnitMode = "A" | "B" | "C";
+export type StructurePosition = "first" | "last";
 
 export type LookupResult = {
   id: number;
@@ -27,6 +28,7 @@ export type WorkerResponse =
       append: boolean;
       hasMore: boolean;
     }
+  | { type: "structure-component"; requestId: number; component: LookupResult }
   | {
       type: "result-batch";
       requestId: number;
