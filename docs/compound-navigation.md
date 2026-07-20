@@ -45,6 +45,12 @@ The comparison uses NFKC normalization, Japanese-locale lowercasing, and
 trimming. Kana and kanji are not treated as equivalent, so a reading query such
 as `けん` can still navigate to the displayed surface `権`.
 
+The Normalized metadata value follows the same rule: it is a lookup action when
+it differs from the current normalized query and plain text for a no-op
+self-match. Its activation must not toggle split expansion on the result card.
+Metadata labels and values occupy explicit grid columns so adjacent POS and
+Normalized rows cannot run together.
+
 ```text
 [A]  選挙
      センキョ
@@ -181,6 +187,8 @@ The interaction is complete when automated and browser tests demonstrate that:
 - A entries are not offered meaningless split expansion.
 - An A surface can initiate a lookup when it differs from the current normalized
   query, while an exact self-match remains plain text.
+- A differing Normalized value initiates a lookup without toggling the card,
+  while an exact self-match remains plain text.
 - B entries expand to A only.
 - C entries expand to B and A only.
 - B and C collapsed headings use Structure components when available.

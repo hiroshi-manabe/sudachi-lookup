@@ -309,13 +309,41 @@ button {
 }
 
 .form-line {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
   margin: 2px 0;
 }
 
 .form-label {
-  display: inline-block;
-  width: 76px;
   color: #89928c;
+}
+
+.form-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.form-link {
+  justify-self: start;
+  min-width: 0;
+  padding: 0 1px;
+  border: 0;
+  border-bottom: 1px solid rgba(35, 91, 71, 0.3);
+  border-radius: 2px;
+  cursor: pointer;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  overflow-wrap: anywhere;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+.form-link:hover {
+  border-color: var(--leaf);
+  color: var(--leaf);
+  background: var(--leaf-light);
 }
 
 .expand-hint,
@@ -337,7 +365,8 @@ button {
 }
 
 .expand-control:focus-visible,
-.component-link:focus-visible {
+.component-link:focus-visible,
+.form-link:focus-visible {
   outline: 3px solid rgba(217, 242, 79, 0.8);
   outline-offset: 3px;
 }

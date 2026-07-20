@@ -272,7 +272,7 @@ export function LookupApp() {
                       <ComponentSequence
                         segments={result.structure}
                         interactive={
-                          result.unit !== "A" || shouldNavigateToSurface(query, result.surface)
+                          result.unit !== "A" || shouldNavigateToValue(query, result.surface)
                         }
                         onNavigate={navigateToComponent}
                       />
@@ -280,8 +280,27 @@ export function LookupApp() {
                     <span className="reading" lang="ja">{result.readingForm}</span>
                   </div>
                   <div className="details">
-                    <span className="form-line"><span className="form-label">Part of speech</span>{result.pos}</span>
-                    <span className="form-line"><span className="form-label">Normalized</span>{result.normalizedForm}</span>
+                    <div className="form-line">
+                      <span className="form-label">Part of speech</span>
+                      <span className="form-value">{result.pos}</span>
+                    </div>
+                    <div className="form-line">
+                      <span className="form-label">Normalized</span>
+                      {shouldNavigateToValue(query, result.normalizedForm) ? (
+                        <button
+                          type="button"
+                          className="form-link"
+                          aria-label={`Search for normalized form ${result.normalizedForm}`}
+                          lang="ja"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            navigateToComponent(result.normalizedForm);
+                          }}
+                        >
+                          {result.normalizedForm}
+                        </button>
+                      ) : <span className="form-value" lang="ja">{result.normalizedForm}</span>}
+                    </div>
                   </div>
                   {result.splits ? (
                     <button
@@ -483,8 +502,8 @@ function updateQueryUrl(query: string, mode: "push" | "replace") {
   window.history[`${mode}State`]({ query }, "", url);
 }
 
-function shouldNavigateToSurface(query: string, surface: string) {
-  return normalizeNavigationText(query) !== normalizeNavigationText(surface);
+function shouldNavigateToValue(query: string, value: string) {
+  return normalizeNavigationText(query) !== normalizeNavigationText(value);
 }
 
 function normalizeNavigationText(value: string) {
