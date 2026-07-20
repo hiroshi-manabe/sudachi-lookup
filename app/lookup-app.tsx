@@ -322,7 +322,7 @@ export function LookupApp() {
               id="lookup-query"
               className="search-input"
               value={query}
-              placeholder="選挙管理委員会"
+              placeholder="見出し語を入力"
               autoComplete="off"
               spellCheck={false}
               onChange={(event) => updateQuery(event.target.value)}
