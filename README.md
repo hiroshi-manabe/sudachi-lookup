@@ -99,30 +99,48 @@ as described in
 
 ## Run with SudachiDict Core locally
 
-After installing the pinned local data prerequisites described in the
-feasibility notes:
+Install and checksum-verify the pinned official package, then derive the neutral
+export and browser files:
 
 ```sh
+npm run data:core:install
 npm run data:core
 npm run data:core:web
 npm run dev
 ```
 
-For the pinned Full edition, use `npm run data:full` followed by
-`npm run data:full:web`. The same application and Worker consume either
+For the pinned Full edition, start with `npm run data:full:install`, then use
+`npm run data:full` followed by `npm run data:full:web`. The same application and Worker consume either
 edition; with both present locally, Full is preferred.
 
 The two generated-data directories are ignored by Git. Normal UI development
 still requires only `npm run dev` and uses the small fixture when Core assets
 are absent.
 
-## Next milestone
+## GitHub and releases
+
+The source repository deliberately excludes neutral exports and generated Core
+or Full browser datasets. [`config/dictionary-release.json`](config/dictionary-release.json)
+pins the official SudachiDict packages, installed-dictionary checksums, Rust
+Sudachi revision, and browser format. A build derives every deployed dictionary
+file from that verified official input.
+
+Ordinary pushes and pull requests run the deterministic sample workflow in
+`.github/workflows/check.yml`. Full production is a separate, manually
+dispatched workflow: it installs the official package, verifies the input,
+derives and validates the complete browser dictionary, assembles Pages, and
+deploys the configured `main` production branch. It requires the GitHub
+`production` environment and the `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` secrets.
+
+## Deployment status
 
 The deterministic static Pages assembly target is implemented and accepts
 exactly one of `sample`, `core`, or `full`. The sample is deployed at
 <https://staging.sudachi-lookup.pages.dev>, and Core is deployed separately at
-<https://core-staging.sudachi-lookup.pages.dev>. Full remains a later,
-explicitly selected release.
+<https://core-staging.sudachi-lookup.pages.dev>. Full is available at
+<https://full-staging.sudachi-lookup.pages.dev> and remains an explicitly
+selected production release.
 
 The current Vinext build remains useful for local development, but its
 Worker-oriented output and locally copied generated datasets must not be
@@ -164,7 +182,8 @@ separately rather than rebuilt on every local or preview run.
 
 ## Licensing
 
-No license has yet been selected for the original code in this repository.
+The original source code in this repository is licensed under the Apache
+License 2.0. See [LICENSE](LICENSE).
 
 SudachiDict is distributed under the Apache License 2.0 and incorporates data
 from UniDic and part of NEologd. Any distributed dictionary derivative must

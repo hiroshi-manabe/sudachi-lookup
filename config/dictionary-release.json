@@ -1,0 +1,19 @@
+{
+  "dictionaryVersion": "20260428",
+  "sudachiPyVersion": "0.6.11",
+  "sudachiRustRevision": "90fd6068c80c2fc3b63e0dbab0e341475bad4d8f",
+  "rustToolchain": "1.85.1",
+  "browserFormatVersion": 10,
+  "editions": {
+    "core": {
+      "pythonPackage": "SudachiDict-core",
+      "pythonModule": "sudachidict_core",
+      "systemDictionarySha256": "6c1d5adc8a2389875713056e7b39bbcd0073d6122ffd509866e1d3a196f8608e"
+    },
+    "full": {
+      "pythonPackage": "SudachiDict-full",
+      "pythonModule": "sudachidict_full",
+      "systemDictionarySha256": "2c993988aae44cbad92b395790c951aa2dad957c983a7d4c32944f6263e02593"
+    }
+  }
+}

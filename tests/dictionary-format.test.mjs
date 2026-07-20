@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { buildSample, splitBoundaries } from "../tools/dictionary/build-sample.mjs";
+import releaseConfig from "../config/dictionary-release.json" with { type: "json" };
 
 test("builds a deterministic binary sample with valid split references", async () => {
   const first = await buildSample();
@@ -25,7 +26,7 @@ test("builds a deterministic binary sample with valid split references", async (
   assert.equal(index.readUInt16LE(4), 2);
   const structure = Buffer.from(first.structureBuffer);
   assert.equal(structure.subarray(0, 4).toString("utf8"), "SDSM");
-  assert.equal(structure.readUInt16LE(4), 10);
+  assert.equal(structure.readUInt16LE(4), releaseConfig.browserFormatVersion);
   assert.ok(first.manifest.structureMatches.firstRelationships > 0);
   assert.ok(first.manifest.structureMatches.lastRelationships > 0);
 });

@@ -30,8 +30,10 @@ The target command surface is:
 
 ```text
 npm run data:sample   Generate or copy the deterministic browser fixture
+npm run data:core:install Install and verify the pinned official Core package
 npm run data:core     Export an installed Core dictionary to a neutral stream
 npm run data:core:web Build locally served Core browser shards
+npm run data:full:install Install and verify the pinned official Full package
 npm run data:full     Export an installed Full dictionary to a neutral stream
 npm run data:full:web Build locally served Full browser shards
 npm run dev           Start the local HTTP development server
@@ -55,10 +57,13 @@ The sample dataset should include:
 The fixture should be small enough to regenerate almost instantly and stable
 enough that UI tests can assert exact ordering.
 
-`npm run data:core` is a separate feasibility/release command. It expects the
-project-local Rust toolchain and the pinned Core installation described in
-[feasibility.md](feasibility.md), and writes ignored artifacts under
-`reports/`. It is intentionally not part of normal frontend checks.
+The release identity is centralized in `config/dictionary-release.json`. It
+pins the official package version, the SHA-256 of each installed `system.dic`,
+the compatible Rust Sudachi revision, and the browser format. The install
+commands obtain the official Python package and reject it if the unpacked
+dictionary checksum differs. `npm run data:core` and `npm run data:full`
+independently verify the same checksum before exporting ignored artifacts under
+`reports/`.
 
 After the neutral export exists, `npm run data:core:web` writes the versioned
 browser dataset under `public/data/releases/`. Those assets are also ignored by
@@ -66,6 +71,7 @@ Git. When that Core manifest is present, the local app selects it automatically;
 otherwise it falls back to the sample fixture. A complete local sequence is:
 
 ```sh
+npm run data:core:install
 npm run data:core
 npm run data:core:web
 npm run dev
@@ -386,19 +392,28 @@ build frontend
 Normal frontend pull requests should build against the sample fixture. Full
 should be attached only to explicit staging and production jobs.
 
-For deployment, store `CLOUDFLARE_ACCOUNT_ID` and
-`CLOUDFLARE_API_TOKEN` as CI secrets. Scope the token to **Account → Cloudflare
-Pages → Edit** and to the intended account. The site workflow should run tests
-before assembly, record the chosen edition and artifact checksum, and pass only
-the clean `dist/pages/` directory to Wrangler. Cloudflare's current setup is
+The repository includes two GitHub Actions workflows:
+
+- `Check` runs the sample generator, tests, type checking, application build,
+  and sample Pages assembly on pushes and pull requests.
+- `Deploy Full production` is manual, derives Full from the pinned official
+  package, uploads only the release reports as a temporary Actions artifact,
+  and deploys the validated static directory to the Pages `main` branch.
+
+Configure a protected GitHub environment named `production`. Add approval
+rules there if desired, and store `CLOUDFLARE_ACCOUNT_ID` and
+`CLOUDFLARE_API_TOKEN` as environment secrets. Scope the token to **Account →
+Cloudflare Pages → Edit** and to the intended account. Never store a Wrangler
+login, generated dictionary, neutral export, or Pages output in Git. The
+workflow passes only the clean `dist/pages/` directory to Wrangler. Cloudflare's current setup is
 documented in
 [Use Direct Upload with continuous integration](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/).
 
 ## Edition policy
 
-Core remains the feasibility and first-production target because it provides a
-useful dataset for establishing budgets. Full is a separate release milestone,
-not a toggle added casually to the frontend.
+Core remains a useful lower-cost preview and validation target. The public
+production workflow selects Full explicitly; it never infers an edition from
+ignored files left in a workspace.
 
 Before publishing Full, record:
 

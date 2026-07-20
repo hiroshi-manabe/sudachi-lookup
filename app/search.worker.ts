@@ -1,6 +1,7 @@
 /// <reference lib="webworker" />
 
 import type { LookupResult } from "./lookup-types";
+import releaseConfig from "../config/dictionary-release.json";
 
 type Entry = Omit<LookupResult, "splits" | "unit" | "structure"> & {
   cost: number;
@@ -47,7 +48,7 @@ type StructureManifest = {
 };
 
 type DictionaryManifest = {
-  formatVersion: 10;
+  formatVersion: number;
   splitEncoding: "u8-code-point-boundaries";
   headwordFilter: "dictionary-form-word-id";
   kanaRanking: "literal-script-tiebreak";
@@ -77,10 +78,10 @@ type DictionaryManifest = {
   structureMatches: StructureManifest;
 };
 
-const DICTIONARY_BASES = [
-  "/data/releases/full-20260428-v10",
-  "/data/releases/core-20260428-v10",
-];
+const FORMAT_VERSION = releaseConfig.browserFormatVersion;
+const DICTIONARY_BASES = ["full", "core"].map(
+  (edition) => `/data/releases/${edition}-${releaseConfig.dictionaryVersion}-v${FORMAT_VERSION}`,
+);
 const INITIAL_RESULTS = 20;
 const PAGE_RESULTS = 50;
 const MAX_CODE_POINT = String.fromCodePoint(0x10ffff);
@@ -208,7 +209,7 @@ async function loadData() {
     if (!response.ok || !isJsonResponse(response)) continue;
     dictionaryManifest = await response.json() as DictionaryManifest;
     if (
-      dictionaryManifest.formatVersion !== 10 ||
+      dictionaryManifest.formatVersion !== FORMAT_VERSION ||
       dictionaryManifest.splitEncoding !== "u8-code-point-boundaries" ||
       dictionaryManifest.headwordFilter !== "dictionary-form-word-id" ||
       dictionaryManifest.kanaRanking !== "literal-script-tiebreak" ||
@@ -445,7 +446,7 @@ async function loadSearchShard(file: string) {
   if (!promise) {
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`検索データを読み込めませんでした: ${file}`);
-      return decodeAliases(await response.arrayBuffer(), 10);
+      return decodeAliases(await response.arrayBuffer(), FORMAT_VERSION);
     });
     searchCache.set(file, promise);
   }
@@ -486,7 +487,7 @@ function loadRecordShard(index: number) {
     if (!file) return Promise.reject(new Error(`辞書データが見つかりません: ${index}`));
     promise = fetch(`${dictionaryBase}/${file}`).then(async (response) => {
       if (!response.ok) throw new Error(`辞書データを読み込めませんでした: ${file}`);
-      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), 10)) {
+      for (const [id, entry] of decodeEntries(await response.arrayBuffer(), FORMAT_VERSION)) {
         entries.set(id, entry);
       }
     });
@@ -603,7 +604,7 @@ function toKatakana(value: string) {
   }).join("");
 }
 
-function decodeEntries(buffer: ArrayBuffer, version: 2 | 10) {
+function decodeEntries(buffer: ArrayBuffer, version: number) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDLX" : "SDRE");
   reader.version(version);
@@ -617,7 +618,7 @@ function decodeEntries(buffer: ArrayBuffer, version: 2 | 10) {
   return decoded;
 }
 
-function decodeAliases(buffer: ArrayBuffer, version: 2 | 10) {
+function decodeAliases(buffer: ArrayBuffer, version: number) {
   const reader = new BinaryReader(buffer);
   reader.magic(version === 2 ? "SDIX" : "SDSH");
   reader.version(version);
@@ -638,7 +639,7 @@ function decodeAliases(buffer: ArrayBuffer, version: 2 | 10) {
 function decodeStructureMatches(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDSM");
-  reader.version(10);
+  reader.version(FORMAT_VERSION);
   const count = reader.u32();
   const decoded = new Map<number, { first: number[]; last: number[] }>();
   for (let index = 0; index < count; index += 1) {
@@ -657,7 +658,7 @@ function decodeStructureMatches(buffer: ArrayBuffer) {
 function decodeBootstrap(buffer: ArrayBuffer) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDBP");
-  reader.version(10);
+  reader.version(FORMAT_VERSION);
   const count = reader.u32();
   const results = new Map<string, number[]>();
   for (let index = 0; index < count; index += 1) {
@@ -673,7 +674,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   const recordCount = reader.u32();
   const bootstrapEntries = new Map<number, Entry>();
   for (let index = 0; index < recordCount; index += 1) {
-    const [id, entry] = decodeEntry(reader, 10);
+    const [id, entry] = decodeEntry(reader, FORMAT_VERSION);
     bootstrapEntries.set(id, entry);
   }
   reader.done();
@@ -685,7 +686,7 @@ function decodeBootstrap(buffer: ArrayBuffer) {
   return { results, entries: bootstrapEntries };
 }
 
-function decodeEntry(reader: BinaryReader, version: 2 | 10): [number, Entry] {
+function decodeEntry(reader: BinaryReader, version: number): [number, Entry] {
   const id = reader.u32();
   const cost = version === 2 ? reader.u16() : reader.i16();
   const surface = reader.string();
@@ -705,7 +706,7 @@ function decodeEntry(reader: BinaryReader, version: 2 | 10): [number, Entry] {
 function decodePosTable(buffer: ArrayBuffer, expectedCount: number) {
   const reader = new BinaryReader(buffer);
   reader.magic("SDPO");
-  reader.version(10);
+  reader.version(FORMAT_VERSION);
   const count = reader.u32();
   if (count !== expectedCount) throw new Error("辞書の品詞数がマニフェストと一致しません");
   const decoded = new Map<number, string>();

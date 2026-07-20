@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { LookupResult, StructurePosition, UnitMode, WorkerResponse } from "./lookup-types";
+import releaseConfig from "../config/dictionary-release.json";
 
 const INITIAL_QUERY = "";
 const INITIAL_RESULT_SLOTS = 20;
@@ -516,7 +517,9 @@ export function LookupApp() {
         <span>{
           dataset === "sample"
             ? "ローカル開発用サンプル"
-            : dataset.startsWith("full-") ? "SudachiDict Full 20260428" : "SudachiDict Core 20260428"
+            : dataset.startsWith("full-")
+              ? `SudachiDict Full ${releaseConfig.dictionaryVersion}`
+              : `SudachiDict Core ${releaseConfig.dictionaryVersion}`
         }</span>
         <span>バイナリ辞書をWeb Worker内で検索</span>
         <a className="footer-link" href="/notices/">辞書のライセンス情報</a>

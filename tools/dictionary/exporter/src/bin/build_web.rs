@@ -185,7 +185,6 @@ struct Manifest {
     headword_filter: &'static str,
     kana_ranking: &'static str,
     source_sha256: String,
-    elapsed_seconds: f64,
 }
 
 struct BinaryWriter {
@@ -994,7 +993,6 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         headword_filter: "dictionary-form-word-id",
         kana_ranking: "literal-script-tiebreak",
         source_sha256: sha256_file(input)?,
-        elapsed_seconds: started.elapsed().as_secs_f64(),
     };
     let manifest_path = output.join("manifest.json");
     let mut manifest_output = BufWriter::new(File::create(&manifest_path)?);
@@ -1012,7 +1010,7 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         manifest.bootstrap_prefixes,
         manifest.bootstrap_candidate_prefixes,
         manifest.bootstrap_bytes,
-        manifest.elapsed_seconds
+        started.elapsed().as_secs_f64()
     );
     Ok(())
 }

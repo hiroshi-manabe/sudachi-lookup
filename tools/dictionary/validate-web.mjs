@@ -2,16 +2,15 @@ import { open, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import process from "node:process";
 import { gunzipSync } from "node:zlib";
+import { datasetName, releaseConfig, root, selectedEdition } from "./release-config.mjs";
 
-const root = resolve(import.meta.dirname, "../..");
-const edition = process.env.SUDACHI_EDITION ?? "core";
-const version = process.env.SUDACHI_VERSION ?? "20260428";
-const release = process.env.SUDACHI_RELEASE ?? `${edition}-${version}`;
-const dataset = `${release}-v10`;
+const edition = selectedEdition();
+const formatVersion = releaseConfig.browserFormatVersion;
+const dataset = datasetName(edition);
 const directory = resolve(root, "public/data/releases", dataset);
 const manifest = JSON.parse(await readFile(resolve(directory, "manifest.json"), "utf8"));
 
-if (manifest.formatVersion !== 10) throw new Error("Unexpected web format version");
+if (manifest.formatVersion !== formatVersion) throw new Error("Unexpected web format version");
 if (manifest.splitEncoding !== "u8-code-point-boundaries") {
   throw new Error("Unexpected split encoding");
 }
@@ -50,7 +49,7 @@ if (bootstrapDecoded.byteLength > manifest.bootstrapBudgetBytes) {
 }
 if (
   bootstrapDecoded.toString("utf8", 0, 4) !== "SDBP" ||
-  bootstrapDecoded.readUInt16LE(4) !== 10 ||
+  bootstrapDecoded.readUInt16LE(4) !== formatVersion ||
   bootstrapDecoded.readUInt32LE(6) !== manifest.bootstrapPrefixes
 ) {
   throw new Error("Invalid bootstrap header");
@@ -63,7 +62,7 @@ for (const shard of manifest.searchShards) {
   if (previousLower && previousLower > shard.lower) throw new Error("Search ranges are not sorted");
   if (shard.lower > shard.upper) throw new Error(`Invalid search range in ${shard.file}`);
   const header = await readHeader(resolve(directory, shard.file));
-  if (header.magic !== "SDSH" || header.version !== 10 || header.count !== shard.aliases) {
+  if (header.magic !== "SDSH" || header.version !== formatVersion || header.count !== shard.aliases) {
     throw new Error(`Invalid search shard header: ${shard.file}`);
   }
   aliasCount += shard.aliases;
@@ -112,7 +111,7 @@ async function validateStructureMatches(structure, entryCount) {
     if (compressed.byteLength !== shard.bytes) throw new Error(`Structure Match byte count differs: ${shard.file}`);
     const bytes = gunzipSync(compressed);
     if (bytes.byteLength !== shard.decodedBytes) throw new Error(`Decoded Structure Match size differs: ${shard.file}`);
-    if (bytes.toString("utf8", 0, 4) !== "SDSM" || bytes.readUInt16LE(4) !== 10) {
+    if (bytes.toString("utf8", 0, 4) !== "SDSM" || bytes.readUInt16LE(4) !== formatVersion) {
       throw new Error(`Invalid Structure Match header: ${shard.file}`);
     }
     const count = bytes.readUInt32LE(6);
@@ -260,7 +259,7 @@ async function validateRecordShard(path, firstExpectedId, posIds) {
   offset += 2;
   const count = bytes.readUInt32LE(offset);
   offset += 4;
-  if (magic !== "SDRE" || version !== 10) throw new Error(`Invalid record shard header: ${path}`);
+  if (magic !== "SDRE" || version !== formatVersion) throw new Error(`Invalid record shard header: ${path}`);
 
   const readString = () => {
     const length = bytes.readUInt16LE(offset);
@@ -307,7 +306,7 @@ async function validateRecordShard(path, firstExpectedId, posIds) {
 function validatePosTable(bytes, expectedCount) {
   if (
     bytes.toString("utf8", 0, 4) !== "SDPO" ||
-    bytes.readUInt16LE(4) !== 10 ||
+    bytes.readUInt16LE(4) !== formatVersion ||
     bytes.readUInt32LE(6) !== expectedCount
   ) {
     throw new Error("Invalid POS table header");

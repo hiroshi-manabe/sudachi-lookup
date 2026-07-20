@@ -2,6 +2,7 @@ import { cp, mkdir, readFile, readdir, stat } from "node:fs/promises";
 import { resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { datasetName, releaseConfig } from "../dictionary/release-config.mjs";
 
 const root = resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const outputDirectory = resolve(root, "dist/pages");
@@ -38,12 +39,12 @@ function datasetForEdition(value) {
       version: 2,
     };
   }
-  const name = `${value}-20260428-v10`;
+  const name = datasetName(value);
   return {
     source: resolve(root, "public/data/releases", name),
     destination: resolve(outputDirectory, "data/releases", name),
     manifest: `data/releases/${name}/manifest.json`,
-    version: 10,
+    version: releaseConfig.browserFormatVersion,
   };
 }
 

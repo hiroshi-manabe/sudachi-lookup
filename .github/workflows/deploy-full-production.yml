@@ -1,0 +1,61 @@
+name: Deploy Full production
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sudachi-lookup-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          npm ci
+          toolchain=$(node -p 'require("./config/dictionary-release.json").rustToolchain')
+          rustup toolchain install "$toolchain" --profile minimal
+          rustup default "$toolchain"
+      - name: Check source and sample build
+        run: |
+          npm run data:release:check
+          npm run data:sample
+          npm test
+          npx tsc --noEmit
+      - name: Install and verify official SudachiDict Full
+        run: npm run data:full:install
+      - name: Derive and validate browser dictionary
+        run: |
+          npm run data:full
+          npm run data:full:web
+          npm run data:full:validate
+      - name: Assemble static Full deployment
+        run: npm run build:pages -- --edition full
+      - name: Upload release reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: sudachi-full-release-report-${{ github.sha }}
+          path: |
+            config/dictionary-release.json
+            reports/full-*/export-report.json
+            public/data/releases/full-*/manifest.json
+          retention-days: 30
+      - name: Deploy Cloudflare Pages production
+        run: npx wrangler pages deploy dist/pages --project-name=sudachi-lookup --branch=main --commit-hash=${{ github.sha }} --commit-dirty=false
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

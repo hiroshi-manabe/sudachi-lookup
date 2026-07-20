@@ -14,15 +14,19 @@
     "deploy:pages:staging": "npm run build:pages -- --edition sample && node tools/site/deploy-pages.mjs --branch staging",
     "deploy:pages:core-staging": "npm run data:core:validate && npm run build:pages -- --edition core && node tools/site/deploy-pages.mjs --branch core-staging",
     "deploy:pages:full-staging": "npm run data:full:validate && npm run build:pages -- --edition full && node tools/site/deploy-pages.mjs --branch full-staging",
+    "deploy:pages:full-production": "npm run data:full:validate && npm run build:pages -- --edition full && node tools/site/deploy-pages.mjs --branch main",
     "data:sample": "node tools/dictionary/build-sample.mjs",
+    "data:release:check": "node tools/dictionary/check-release-config.mjs",
+    "data:core:install": "SUDACHI_EDITION=core node tools/dictionary/install-official-dictionary.mjs",
     "data:core": "SUDACHI_EDITION=core node tools/dictionary/export-dictionary.mjs",
     "data:core:web": "SUDACHI_EDITION=core node tools/dictionary/build-dictionary-web.mjs",
     "data:full": "SUDACHI_EDITION=full node tools/dictionary/export-dictionary.mjs",
     "data:full:web": "SUDACHI_EDITION=full node tools/dictionary/build-dictionary-web.mjs",
     "data:core:validate": "SUDACHI_EDITION=core node tools/dictionary/validate-web.mjs",
+    "data:full:install": "SUDACHI_EDITION=full node tools/dictionary/install-official-dictionary.mjs",
     "data:full:validate": "SUDACHI_EDITION=full node tools/dictionary/validate-web.mjs",
     "test": "node --test tests/*.test.mjs",
-    "check": "npm run data:sample && npm test && tsc --noEmit && npm run build && npm run build:pages -- --edition sample"
+    "check": "npm run data:release:check && npm run data:sample && npm test && tsc --noEmit && npm run build && npm run build:pages -- --edition sample"
   },
   "dependencies": {
     "next": "16.2.6",

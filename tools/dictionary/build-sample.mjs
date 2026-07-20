@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
+import { releaseConfig } from "./release-config.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sourcePath = resolve(root, "tools/dictionary/fixtures/sample.json");
@@ -123,7 +124,7 @@ export function encodeStructureMatches(entries) {
   const postings = buildStructurePostings(entries);
   const writer = new BinaryWriter();
   writer.magic("SDSM");
-  writer.u16(10);
+  writer.u16(releaseConfig.browserFormatVersion);
   writer.u32(postings.length);
   for (const item of postings) {
     writer.u32(item.id);
