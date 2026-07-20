@@ -48,7 +48,8 @@ The sample dataset should include:
 - Homographs that must remain distinct
 - Entries with no split information
 - Representative C entries with both B and A splits
-- Reverse Structure fixtures with no, one, multiple, and broad canonical parents
+- Structure Match fixtures covering first and last positions with no, one,
+  multiple, and broad canonical parent lists
 - Unicode normalization and punctuation edge cases
 
 The fixture should be small enough to regenerate almost instantly and stable

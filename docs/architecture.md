@@ -605,7 +605,7 @@ owner explicitly chooses one.
 - Evaluate substring or fuzzy search from observed demand.
 - Evaluate arbitrary-text tokenization independently from lexicon lookup.
 - Evaluate the lazy, identity-based reverse Structure lookup specified in
-  [Reverse Structure Lookup Plan](structure-tail-lookup.md).
+  [Structure Match Lookup Plan](structure-match-lookup.md).
 - Optionally make the provider behind the neutral web-search action configurable.
 
 ## 15. Open questions

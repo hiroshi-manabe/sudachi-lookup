@@ -1,4 +1,4 @@
-# Reverse Structure Lookup Plan
+# Structure Match Lookup Plan
 
 ## Status
 
@@ -9,14 +9,16 @@ existing component-navigation behavior remain unchanged.
 ## Purpose
 
 Sudachi Lookup currently moves from a compound to one of its displayed
-components by searching that component's surface as text. Reverse Structure
+components by searching that component's surface as text. Structure Match
 lookup would support the opposite exploration:
 
-> Find canonical headwords whose direct `word_structure` ends with this entry.
+> Find canonical headwords whose direct `word_structure` begins or ends with
+> this entry.
 
-For example, activating the relationship lookup from the dictionary entry for
-`委員会` may return `選挙管理委員会` when its Structure is
-`選挙 / 管理 / 委員会`.
+For example, a last-position lookup from `委員会` may return
+`選挙管理委員会` when its Structure is `選挙 / 管理 / 委員会`. A
+first-position lookup from `自` may isolate `自文化` when its Structure is
+`自 / 文化`, without mixing it into every ordinary prefix match for `自`.
 
 This is a relationship query, not prefix or suffix string matching. A typed
 query for `委員会` continues to search aliases by text. Relationship mode is
@@ -27,10 +29,11 @@ Sudachi word identity.
 
 The first implementation should use deliberately narrow semantics:
 
-- Inspect only the final direct component of `word_structure`.
+- Support the first and last direct components of `word_structure` as two
+  explicit positions.
 - Do not inspect A- or B-unit split lists.
 - Do not recursively descend into nested Structure components.
-- Do not infer relationships from matching surface suffixes.
+- Do not infer relationships from matching surface prefixes or suffixes.
 - Return only canonical dictionary-form parent entries, following the existing
   headword-filtering policy.
 - Canonicalize a referenced component through its dictionary-form word ID before
@@ -38,24 +41,31 @@ The first implementation should use deliberately narrow semantics:
   that originate from an internal inflection-state identity.
 - Deduplicate a parent under a component identity.
 
-Indexing every Structure position is a plausible later extension, but it should
-be a different relationship mode rather than a silent expansion of these
+Indexing interior Structure positions is a plausible later extension, but it
+should be a different relationship mode rather than a silent expansion of these
 semantics.
 
 ## Interaction model
 
 ### Entering relationship mode
 
-A result may offer a secondary action such as:
+A result offers one compact, grouped secondary action:
 
 ```text
-この語を後部の構造に持つ語
+構造一致: 先頭 / 末尾
 ```
 
-Activating it uses that result's canonical word ID. It must not perform a text
-lookup or toggle the result's split expansion. The exact visual placement
-should be tested against the existing headword, web-search, metadata, and split
-controls before implementation; the action should remain clearly secondary.
+`先頭` and `末尾` are separate links that use the result's canonical word ID
+and enter the corresponding position directly. Their complete accessible names
+are intentionally more explicit than their visible labels:
+
+- `「自」を構造の先頭に持つ語を検索`
+- `「委員会」を構造の末尾に持つ語を検索`
+
+Neither link performs a text lookup or toggles the result's split expansion.
+The grouped action should remain visually secondary and be tested against the
+existing headword, web-search, metadata, and split controls before
+implementation.
 
 ### Search control
 
@@ -66,11 +76,12 @@ Sudachi辞書を検索
 [ 委員会                                      ]
 ```
 
-Relationship mode replaces the editable value with one non-editable token:
+Structure Match mode replaces the editable value with one non-editable token
+and a two-position selector:
 
 ```text
-後部の構造に持つ語を検索
-[  委員会  ×                                  ]
+構造一致
+[  委員会  ×  ]   [ 先頭 | 末尾 ]
 ```
 
 The token represents the selected word ID, not merely its visible surface. Its
@@ -91,30 +102,38 @@ The search control should behave as follows:
 - IME composition applies only to ordinary text mode.
 - A direct URL initially shows a token-loading state until the selected record
   supplies its surface and reading.
+- Switching `先頭` and `末尾` retains the selected identity and immediately
+  starts the other relationship lookup.
+- A position switch replaces the current relationship history entry rather
+  than creating a Back step for every toggle.
 
-The result heading should name the relationship explicitly:
+The visible result heading remains compact because the search control already
+expresses the relationship:
 
 ```text
-「委員会」を後部の構造に持つ語
+検索結果
 ```
 
-Empty, loading, error, result-count, and continuation messages must not imply
-that a prefix text search is running.
+An accessible status description can use the complete wording, such as
+`「自」を構造の先頭に持つ語を検索中`. Empty, loading, error, result-count,
+and continuation messages must not imply that a prefix text search is running.
 
 ### URL and state
 
 Use mutually exclusive query representations:
 
 ```text
-?q=委員会          ordinary text lookup
-?tail=123456       reverse Structure lookup by canonical word ID
+?q=委員会                         ordinary text lookup
+?structure=first&component=123456   first-position Structure Match
+?structure=last&component=123456    last-position Structure Match
 ```
 
-`tail` wins only when it is a valid unsigned word ID for the active dictionary
-artifact. An invalid or unavailable identity should produce a recoverable
-Japanese error and offer a return to ordinary search. The URL does not need to
-duplicate the surface: a direct visit can load the existing record shard for
-the ID, while same-session history may render the cached label immediately.
+Structure Match mode is valid only when `structure` is `first` or `last` and
+`component` is a valid unsigned word ID for the active dictionary artifact. An
+invalid position or unavailable identity should produce a recoverable Japanese
+error and offer a return to ordinary search. The URL does not need to duplicate
+the surface: a direct visit can load the existing record shard for the ID,
+while same-session history may render the cached label immediately.
 
 The UI state should be modeled as a tagged union rather than parallel query
 flags:
@@ -122,7 +141,12 @@ flags:
 ```ts
 type LookupMode =
   | { kind: "text"; query: string }
-  | { kind: "structure-tail"; componentId: number; surface?: string };
+  | {
+      kind: "structure-match";
+      position: "first" | "last";
+      componentId: number;
+      surface?: string;
+    };
 ```
 
 ## Reverse-index data
@@ -134,7 +158,8 @@ references are reduced to display boundaries:
 
 ```text
 canonical component word ID
-    -> pre-ranked canonical parent word IDs
+    -> first-position pre-ranked canonical parent word IDs
+    -> last-position pre-ranked canonical parent word IDs
 ```
 
 No component strings, parent strings, POS values, or complete records belong in
@@ -160,7 +185,7 @@ reverse-index shards. A candidate binary shard contains:
 
 - a format magic and version;
 - delta-encoded component word IDs;
-- a posting count per component;
+- first- and last-position posting counts per component;
 - pre-ranked parent IDs encoded as compact unsigned values or signed deltas;
 - optional per-list continuation offsets if needed by large postings.
 
@@ -173,32 +198,31 @@ search.
 
 ### Measured scale
 
-The July 2026 neutral Core and Full exports give the following tail-only counts
-after canonical parent filtering:
+The July 2026 neutral Core and Full exports give the following combined
+first-and-last counts after canonical parent filtering:
 
 | Measure | Core | Full |
 | --- | ---: | ---: |
 | Canonical searchable entries | 1,198,652 | 2,452,463 |
 | Canonical parents with Structure | 573,277 | 1,487,960 |
-| Distinct direct tail components | 114,943 | 290,200 |
-| Median parent postings | 3 | 2 |
-| p95 parent postings | 11 | 13 |
-| p99 parent postings | 35 | 52 |
-| Maximum parent postings | 15,084 | 15,084 |
+| First- plus last-position relationships | 1,146,554 | 2,975,920 |
+| Distinct direct first components | 44,140 | 149,906 |
+| Distinct direct last components | 114,943 | 290,200 |
+| Distinct components in either position | 146,722 | 395,783 |
 
 A simulation using component-ID deltas, parent-ID deltas, and one gzip stream
 produced:
 
 | Artifact | Core | Full |
 | --- | ---: | ---: |
-| Compact decoded bytes | 1,606,003 | 4,148,587 |
-| Simulated gzip bytes | 1,191,042 | 3,410,188 |
-| Production sharded budget | 1.3–1.6 MiB | 3.6–4.2 MiB |
+| Compact decoded bytes | 2,479,863 | 6,658,639 |
+| Simulated gzip bytes | 1,486,728 | 4,461,778 |
+| Production sharded budget | 1.7–2.1 MiB | 4.8–5.8 MiB |
 
 The single-stream gzip result is a lower-bound experiment, not a committed file
 format. Independent shards, pre-ranked rather than monotonically sorted parent
 IDs, headers, and routing metadata may increase it. The format prototype should
-therefore enforce a conservative Full transfer budget of 6 MiB until its real
+therefore enforce a conservative Full transfer budget of 8 MiB until its real
 encoding is measured.
 
 For context, indexing every distinct component position produced approximately
@@ -211,7 +235,7 @@ Extend the Worker protocol with an explicit relationship request rather than
 overloading the text-search message. The flow is:
 
 ```text
-component word ID
+component word ID and first/last position
     -> manifest range route
     -> one lazy reverse-index shard
     -> stable first page of pre-ranked parent IDs
@@ -235,7 +259,7 @@ The builder and generated-data validator should prove that:
 
 - every indexed component and parent ID is in range;
 - every parent is a canonical searchable identity;
-- every relationship corresponds to the canonicalized final direct
+- every relationship corresponds to the canonicalized first or last direct
   `word_structure` reference in the neutral export;
 - no parent is duplicated within one posting list;
 - every posting list follows the declared deterministic rank;
@@ -247,7 +271,11 @@ The builder and generated-data validator should prove that:
 Application tests should cover:
 
 - entering the mode from a particular result rather than from its text alone;
+- the compact `構造一致: 先頭 / 末尾` links select the correct identity and
+  position without toggling the result;
 - non-editable token behavior and clear-button labeling;
+- switching `先頭` and `末尾` retains the identity, updates the URL, and starts
+  only the newly selected relationship request;
 - Delete and Backspace clearing the token;
 - ordinary typing remaining an ordinary text search;
 - direct URL loading and Back/Forward restoration;
@@ -267,7 +295,7 @@ Application tests should cover:
   distributions.
 - Confirm canonicalization behavior for component references.
 - Freeze a new browser-data format version only after these results pass the
-  6 MiB Full budget.
+  8 MiB Full budget.
 
 ### Phase 2: generated data and validation
 
@@ -286,9 +314,12 @@ Application tests should cover:
 
 ### Phase 4: token-mode interface
 
-- Add the result-level entry action.
+- Add the grouped result-level `構造一致: 先頭 / 末尾` action with complete
+  accessible labels.
 - Replace editable text with the non-editable identity token in relationship
   mode.
+- Add the matching `先頭 / 末尾` selector and compact `構造一致` mode label to
+  the search control.
 - Implement clear, Delete, Backspace, focus, URL, history, and direct-load
   behavior.
 - Add relationship-specific Japanese status and result copy.
@@ -309,7 +340,7 @@ Application tests should cover:
 The first implementation should not include these unless measurements or use
 cases justify them:
 
-- matching a component at any Structure position;
+- matching a component at an interior Structure position;
 - recursive ancestor traversal;
 - A- or B-split reverse relationships;
 - combining multiple component tokens;

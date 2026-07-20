@@ -154,7 +154,7 @@ separately rather than rebuilt on every local or preview run.
 - [Development and deployment workflow](docs/development.md)
 - [Initial feasibility findings](docs/feasibility.md)
 - [Compound navigation interaction](docs/compound-navigation.md)
-- [Reverse Structure lookup plan](docs/structure-tail-lookup.md)
+- [Structure Match lookup plan](docs/structure-match-lookup.md)
 
 ## Licensing
 
