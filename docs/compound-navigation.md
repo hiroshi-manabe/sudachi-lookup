@@ -51,6 +51,13 @@ self-match. Its activation must not toggle split expansion on the result card.
 Metadata labels and values occupy explicit grid columns so adjacent POS and
 Normalized rows cannot run together.
 
+Every result also offers a secondary `ウェブで検索` action. It searches the
+result surface on Google in a new tab and must not toggle split expansion. The
+visible label stays provider-neutral so a future version can make the provider
+configurable without changing the result layout. Provider selection is only a
+possible future task, not a first-release requirement. The external request is
+made only after the user activates this action.
+
 ```text
 [A]  選挙
      センキョ
@@ -194,6 +201,7 @@ The interaction is complete when automated and browser tests demonstrate that:
 - B and C collapsed headings use Structure components when available.
 - Every Structure, A, and B component can initiate a lookup.
 - Component activation does not also toggle the originating result.
+- Web search opens the result surface in a new tab without toggling the result.
 - Browser Back returns to the previous query after component navigation.
 - Homographs remain visible after searching a component surface.
 - Keyboard and screen-reader users can distinguish navigation from expansion.

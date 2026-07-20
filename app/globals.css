@@ -357,6 +357,30 @@ button {
   white-space: nowrap;
 }
 
+.result-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-end;
+}
+
+.web-search {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.4;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.web-search:hover {
+  color: var(--leaf);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .expand-control {
   padding: 0;
   border: 0;
@@ -366,7 +390,8 @@ button {
 
 .expand-control:focus-visible,
 .component-link:focus-visible,
-.form-link:focus-visible {
+.form-link:focus-visible,
+.web-search:focus-visible {
   outline: 3px solid rgba(217, 242, 79, 0.8);
   outline-offset: 3px;
 }

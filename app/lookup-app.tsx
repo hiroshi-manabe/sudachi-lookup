@@ -5,6 +5,7 @@ import type { LookupResult, UnitMode, WorkerResponse } from "./lookup-types";
 
 const INITIAL_QUERY = "";
 const INITIAL_RESULT_SLOTS = 20;
+const WEB_SEARCH_URL = "https://www.google.com/search?q=";
 type SearchState = "loading" | "idle" | "searching" | "hydrating" | "settled" | "error";
 type ResultSlot = { id: number | null; result: LookupResult | null };
 
@@ -302,22 +303,35 @@ export function LookupApp() {
                       ) : <span className="form-value" lang="ja">{result.normalizedForm}</span>}
                     </div>
                   </div>
-                  {result.splits ? (
-                    <button
-                      type="button"
-                      className="expand-control"
-                      aria-expanded={expanded}
-                      aria-controls={panelId}
-                      aria-label={`「${result.surface}」の分割単位を${expanded ? "閉じる" : "開く"}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        toggleResult(result);
-                      }}
+                  <div className="result-actions">
+                    {result.splits ? (
+                      <button
+                        type="button"
+                        className="expand-control"
+                        aria-expanded={expanded}
+                        aria-controls={panelId}
+                        aria-label={`「${result.surface}」の分割単位を${expanded ? "閉じる" : "開く"}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleResult(result);
+                        }}
+                      >
+                        <span>分割単位</span>
+                        <span className="expand-symbol" aria-hidden="true">+</span>
+                      </button>
+                    ) : <span className="expand-hint">A単位</span>}
+                    <a
+                      className="web-search"
+                      href={webSearchUrl(result.surface)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`「${result.surface}」をウェブで検索（新しいタブで開きます）`}
+                      onClick={(event) => event.stopPropagation()}
                     >
-                      <span>分割単位</span>
-                      <span className="expand-symbol" aria-hidden="true">+</span>
-                    </button>
-                  ) : <span className="expand-hint">A単位</span>}
+                      <span>ウェブで検索</span>
+                      <span aria-hidden="true">↗</span>
+                    </a>
+                  </div>
                 </div>
                 {expanded && result.splits ? (
                   <SplitPanel id={panelId} result={result} onNavigate={navigateToComponent} />
@@ -508,4 +522,8 @@ function shouldNavigateToValue(query: string, value: string) {
 
 function normalizeNavigationText(value: string) {
   return value.normalize("NFKC").toLocaleLowerCase("ja-JP").trim();
+}
+
+function webSearchUrl(value: string) {
+  return `${WEB_SEARCH_URL}${encodeURIComponent(value)}`;
 }

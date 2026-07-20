@@ -604,6 +604,7 @@ owner explicitly chooses one.
 - Offer an explicit offline/full-data download.
 - Evaluate substring or fuzzy search from observed demand.
 - Evaluate arbitrary-text tokenization independently from lexicon lookup.
+- Optionally make the provider behind the neutral web-search action configurable.
 
 ## 15. Open questions
 
