@@ -32,12 +32,15 @@ The target command surface is:
 
 ```text
 npm run data:sample   Generate or copy the deterministic browser fixture
+npm run data:small:install Install and verify the pinned official Small package
+npm run data:small    Export an installed Small dictionary to a neutral stream
 npm run data:core:install Install and verify the pinned official Core package
 npm run data:core     Export an installed Core dictionary to a neutral stream
 npm run data:core:web Build locally served Core browser shards
 npm run data:full:install Install and verify the pinned official Full package
 npm run data:full     Export an installed Full dictionary to a neutral stream
 npm run data:full:web Build locally served Full browser shards
+npm run data:editions:verify Verify the cumulative Small/Core/Full word-ID ranges
 npm run dev           Start the local HTTP development server
 npm test              Run unit, integrity, and search fixtures
 npm run build         Produce deployable static output
@@ -82,6 +85,11 @@ npm run dev
 The Full commands use the same exporter and browser-format builder. When both
 generated editions are present locally, the application currently prefers Full;
 it falls back through Core to the sample fixture as assets become unavailable.
+
+A production Full release additionally exports Small and Core and runs
+`npm run data:editions:verify`. This proves that Small is the exact leading
+range of Core and that Core is the exact leading range of Full before the
+manifest publishes the two edition-membership boundaries.
 
 Do not use `file://` as a development environment. An HTTP server is required
 to exercise module workers, relative `fetch` calls, MIME types, and realistic

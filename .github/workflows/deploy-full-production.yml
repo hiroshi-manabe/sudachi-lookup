@@ -36,11 +36,19 @@ jobs:
           npm run data:sample
           npm test
           npx tsc --noEmit
-      - name: Install and verify official SudachiDict Full
-        run: npm run data:full:install
+      - name: Install and verify official SudachiDict editions
+        run: |
+          npm run data:small:install
+          npm run data:core:install
+          npm run data:full:install
+      - name: Export and verify cumulative edition identities
+        run: |
+          npm run data:small
+          npm run data:core
+          npm run data:full
+          npm run data:editions:verify
       - name: Derive and validate browser dictionary
         run: |
-          npm run data:full
           npm run data:full:web
           npm run data:full:validate
       - name: Assemble static Full deployment
@@ -51,6 +59,8 @@ jobs:
           name: sudachi-full-release-report-${{ github.sha }}
           path: |
             config/dictionary-release.json
+            reports/small-*/export-report.json
+            reports/core-*/export-report.json
             reports/full-*/export-report.json
             public/data/releases/full-*/manifest.json
           retention-days: 30

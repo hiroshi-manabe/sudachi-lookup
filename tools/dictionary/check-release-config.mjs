@@ -16,6 +16,15 @@ if (!exporter.includes(`const SUDACHI_REVISION: &str = "${releaseConfig.sudachiR
 if (!builder.includes(`const FORMAT_VERSION: u16 = ${releaseConfig.browserFormatVersion};`)) {
   throw new Error("Rust browser format differs from dictionary-release.json");
 }
+const editionCounts = ["small", "core", "full"].map((edition) =>
+  releaseConfig.editions[edition]?.sourceEntries,
+);
+if (
+  editionCounts.some((count) => !Number.isSafeInteger(count) || count <= 0) ||
+  !(editionCounts[0] < editionCounts[1] && editionCounts[1] < editionCounts[2])
+) {
+  throw new Error("SudachiDict edition source-entry boundaries are missing or unordered");
+}
 console.log(
   `Release configuration is consistent: SudachiDict ${releaseConfig.dictionaryVersion}, ` +
   `browser format v${releaseConfig.browserFormatVersion}.`,

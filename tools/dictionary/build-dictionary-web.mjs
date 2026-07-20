@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 import process from "node:process";
-import { datasetName, releaseName, root, selectedEdition } from "./release-config.mjs";
+import { datasetName, releaseConfig, releaseName, root, selectedEdition } from "./release-config.mjs";
 
 const localCargoHome = resolve(root, ".tooling/cargo");
 const cargoHome = process.env.CARGO_HOME ?? localCargoHome;
@@ -10,6 +10,8 @@ const rustupHome = process.env.RUSTUP_HOME ?? resolve(root, ".tooling/rustup");
 const localCargo = resolve(localCargoHome, "bin/cargo");
 const cargo = process.env.CARGO ?? (existsSync(localCargo) ? localCargo : "cargo");
 const edition = selectedEdition();
+const smallUpperExclusive = releaseConfig.editions.small.sourceEntries;
+const coreUpperExclusive = releaseConfig.editions.core.sourceEntries;
 const release = releaseName(edition);
 const input = resolve(root, "reports", release, "entries.jsonl.gz");
 const dataset = datasetName(edition);
@@ -35,6 +37,8 @@ const result = spawnSync(
     input,
     output,
     dataset,
+    String(smallUpperExclusive),
+    String(coreUpperExclusive),
   ],
   {
     cwd: root,

@@ -5,15 +5,23 @@
   "rustToolchain": "1.85.1",
   "browserFormatVersion": 10,
   "editions": {
+    "small": {
+      "pythonPackage": "SudachiDict-small",
+      "pythonModule": "sudachidict_small",
+      "systemDictionarySha256": "326ef9fd12aee1cfe6085afb97d38f34cbb34a47549d3507a6b03e10d14165af",
+      "sourceEntries": 765649
+    },
     "core": {
       "pythonPackage": "SudachiDict-core",
       "pythonModule": "sudachidict_core",
-      "systemDictionarySha256": "6c1d5adc8a2389875713056e7b39bbcd0073d6122ffd509866e1d3a196f8608e"
+      "systemDictionarySha256": "6c1d5adc8a2389875713056e7b39bbcd0073d6122ffd509866e1d3a196f8608e",
+      "sourceEntries": 1629080
     },
     "full": {
       "pythonPackage": "SudachiDict-full",
       "pythonModule": "sudachidict_full",
-      "systemDictionarySha256": "2c993988aae44cbad92b395790c951aa2dad957c983a7d4c32944f6263e02593"
+      "systemDictionarySha256": "2c993988aae44cbad92b395790c951aa2dad957c983a7d4c32944f6263e02593",
+      "sourceEntries": 2883177
     }
   }
 }

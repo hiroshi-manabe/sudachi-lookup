@@ -141,6 +141,14 @@ struct StructureManifest {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+struct EditionMembership {
+    identity: &'static str,
+    small_upper_exclusive: u32,
+    core_upper_exclusive: u32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct SizeStats {
     minimum: u64,
     median: u64,
@@ -157,6 +165,7 @@ struct Manifest {
     entries: u64,
     searchable_entries: u64,
     filtered_inflection_entries: u64,
+    edition_membership: EditionMembership,
     aliases: usize,
     pos_table_file: String,
     pos_count: usize,
@@ -439,7 +448,10 @@ fn build_structure_shards(
         let rank = |left: &u32, right: &u32| {
             source.costs[*left as usize]
                 .cmp(&source.costs[*right as usize])
-                .then(source.surface_lengths[*left as usize].cmp(&source.surface_lengths[*right as usize]))
+                .then(
+                    source.surface_lengths[*left as usize]
+                        .cmp(&source.surface_lengths[*right as usize]),
+                )
                 .then(left.cmp(right))
         };
         values.first.sort_unstable_by(rank);
@@ -849,7 +861,13 @@ fn load_source_index(input: &Path) -> Result<SourceIndex, Box<dyn Error>> {
     })
 }
 
-fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error>> {
+fn run(
+    input: &Path,
+    output: &Path,
+    dataset: String,
+    small_upper_exclusive: u32,
+    core_upper_exclusive: u32,
+) -> Result<(), Box<dyn Error>> {
     let started = Instant::now();
     fs::create_dir_all(output)?;
     let source = load_source_index(input)?;
@@ -883,13 +901,27 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             || entry.dictionary_form_word_id == entry.word_id as i32
         {
             add_aliases(&mut aliases, &entry);
-            if let (Some(first), Some(last)) = (entry.word_structure.first(), entry.word_structure.last()) {
+            if let (Some(first), Some(last)) =
+                (entry.word_structure.first(), entry.word_structure.last())
+            {
                 let canonicalize = |id: u32| {
                     let target = source.dictionary_form_word_ids[id as usize];
-                    if target == -1 || target == id as i32 { id } else { target as u32 }
+                    if target == -1 || target == id as i32 {
+                        id
+                    } else {
+                        target as u32
+                    }
                 };
-                structure_postings.entry(canonicalize(*first)).or_default().first.push(entry.word_id);
-                structure_postings.entry(canonicalize(*last)).or_default().last.push(entry.word_id);
+                structure_postings
+                    .entry(canonicalize(*first))
+                    .or_default()
+                    .first
+                    .push(entry.word_id);
+                structure_postings
+                    .entry(canonicalize(*last))
+                    .or_default()
+                    .last
+                    .push(entry.word_id);
             }
         }
         record_entries.push(entry);
@@ -915,6 +947,16 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
             &mut record_entries,
             &source.surfaces,
         )?;
+    }
+
+    if small_upper_exclusive == 0
+        || small_upper_exclusive >= core_upper_exclusive
+        || u64::from(core_upper_exclusive) > entries
+    {
+        return Err(format!(
+            "invalid edition boundaries: Small {small_upper_exclusive}, Core {core_upper_exclusive}, entries {entries}",
+        )
+        .into());
     }
 
     aliases.sort_unstable_by(alias_order);
@@ -962,6 +1004,11 @@ fn run(input: &Path, output: &Path, dataset: String) -> Result<(), Box<dyn Error
         entries,
         searchable_entries: source.searchable_entries,
         filtered_inflection_entries: entries - source.searchable_entries,
+        edition_membership: EditionMembership {
+            identity: "minimum-sudachidict-edition-by-word-id",
+            small_upper_exclusive,
+            core_upper_exclusive,
+        },
         aliases: aliases.len(),
         pos_table_file,
         pos_count: source.pos_entries.len(),
@@ -1042,20 +1089,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut args = env::args();
     let program = args.next().unwrap_or_else(|| "build_web".into());
     let input = PathBuf::from(args.next().ok_or_else(|| {
-        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset>")
+        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>")
     })?);
     let output = PathBuf::from(args.next().ok_or_else(|| {
-        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset>")
+        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>")
     })?);
     let dataset = args.next().ok_or_else(|| {
-        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset>")
+        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>")
     })?;
+    let small_upper_exclusive = args.next().ok_or_else(|| {
+        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>")
+    })?.parse::<u32>()?;
+    let core_upper_exclusive = args.next().ok_or_else(|| {
+        format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>")
+    })?.parse::<u32>()?;
     if args.next().is_some() {
         return Err(
-            format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset>").into(),
+            format!("usage: {program} <entries.jsonl.gz> <output-directory> <dataset> <small-upper-exclusive> <core-upper-exclusive>").into(),
         );
     }
-    run(&input, &output, dataset)
+    run(
+        &input,
+        &output,
+        dataset,
+        small_upper_exclusive,
+        core_upper_exclusive,
+    )
 }
 
 #[cfg(test)]

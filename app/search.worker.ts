@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
 
-import type { LookupResult } from "./lookup-types";
+import type { DictionaryEdition, LookupResult } from "./lookup-types";
 import releaseConfig from "../config/dictionary-release.json";
 
-type Entry = Omit<LookupResult, "splits" | "unit" | "structure"> & {
+type Entry = Omit<LookupResult, "edition" | "splits" | "unit" | "structure"> & {
   cost: number;
   aBoundaries: number[];
   bBoundaries: number[];
@@ -56,6 +56,11 @@ type DictionaryManifest = {
   entries: number;
   searchableEntries: number;
   filteredInflectionEntries: number;
+  editionMembership: {
+    identity: "minimum-sudachidict-edition-by-word-id";
+    smallUpperExclusive: number;
+    coreUpperExclusive: number;
+  };
   aliases: number;
   posTableFile: string;
   posCount: number;
@@ -536,6 +541,7 @@ function toResult(entry: Entry): LookupResult {
     normalizedForm: entry.normalizedForm,
     dictionaryForm: entry.dictionaryForm,
     pos: entry.pos,
+    edition: editionForEntry(entry.id),
     unit,
     structure: unit === "A"
       ? [entry.surface]
@@ -549,6 +555,14 @@ function toResult(entry: Entry): LookupResult {
         ? { a: splitSurface(entry.surface, entry.aBoundaries) }
         : null,
   };
+}
+
+function editionForEntry(id: number): DictionaryEdition | null {
+  const membership = dictionaryManifest?.editionMembership;
+  if (!membership) return null;
+  if (id < membership.smallUpperExclusive) return "Small";
+  if (id < membership.coreUpperExclusive) return "Core";
+  return "Full";
 }
 
 function splitSurface(surface: string, boundaries: number[]) {

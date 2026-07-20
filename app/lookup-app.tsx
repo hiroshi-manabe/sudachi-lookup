@@ -455,6 +455,12 @@ export function LookupApp() {
                         </button>
                       ) : <span className="form-value" lang="ja">{result.normalizedForm}</span>}
                     </div>
+                    {result.edition ? (
+                      <div className="form-line">
+                        <span className="form-label">収録</span>
+                        <span className="form-value">{result.edition}</span>
+                      </div>
+                    ) : null}
                   </div>
                   <div className="result-actions">
                     {result.splits ? (

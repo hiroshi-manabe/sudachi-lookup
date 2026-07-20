@@ -16,6 +16,7 @@ server, search API, hosted database, or runtime dictionary service.
 - Hiragana and katakana matching with literal-script ranking
 - Progressive results and record hydration in a Web Worker
 - Navigable compound components and expandable A/B/C segmentation
+- Per-headword Small/Core/Full provenance derived without per-record storage
 - Structure Match lookup for words that begin or end with a selected direct
   Structure component
 - Compact binary shards fetched only when a query needs them
@@ -148,6 +149,7 @@ page and from the Japanese README.
 - [Structure Match lookup](docs/structure-match-lookup.md)
 - [Canonical headword filtering](docs/canonical-headword-filtering.md)
 - [Compact split-boundary format](docs/split-boundary-format.md)
+- [Dictionary-edition membership](docs/edition-membership.md)
 
 ## License
 

@@ -4,6 +4,7 @@ export type SplitView = {
 };
 
 export type UnitMode = "A" | "B" | "C";
+export type DictionaryEdition = "Small" | "Core" | "Full";
 export type StructurePosition = "first" | "last";
 
 export type LookupResult = {
@@ -13,6 +14,7 @@ export type LookupResult = {
   normalizedForm: string;
   dictionaryForm: string;
   pos: string;
+  edition: DictionaryEdition | null;
   unit: UnitMode;
   structure: string[];
   splits: SplitView | null;

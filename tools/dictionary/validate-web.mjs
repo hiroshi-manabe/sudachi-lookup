@@ -32,6 +32,18 @@ const posIds = validatePosTable(posDecoded, manifest.posCount);
 if (manifest.searchableEntries + manifest.filteredInflectionEntries !== manifest.entries) {
   throw new Error("Headword counts do not cover every source record");
 }
+if (manifest.entries !== releaseConfig.editions[edition].sourceEntries) {
+  throw new Error("Manifest entry count differs from the pinned edition boundary");
+}
+if (
+  manifest.editionMembership?.identity !== "minimum-sudachidict-edition-by-word-id" ||
+  manifest.editionMembership.smallUpperExclusive !== releaseConfig.editions.small.sourceEntries ||
+  manifest.editionMembership.coreUpperExclusive !== releaseConfig.editions.core.sourceEntries ||
+  manifest.editionMembership.smallUpperExclusive >= manifest.editionMembership.coreUpperExclusive ||
+  manifest.editionMembership.coreUpperExclusive > manifest.entries
+) {
+  throw new Error("Unexpected SudachiDict edition membership boundaries");
+}
 if (manifest.dataset !== dataset) throw new Error("Manifest dataset does not match directory");
 if (manifest.records.files.length !== Math.ceil(manifest.entries / manifest.records.span)) {
   throw new Error("Record shard count does not cover every entry");

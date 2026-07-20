@@ -162,6 +162,13 @@ record IDs to shared JavaScript strings, so the UI contract remains unchanged.
 Empty or identical forms may still be represented as references to `surface`
 rather than duplicate strings in a future format.
 
+The displayed Small/Core/Full membership is also derived rather than stored in
+each record. For a pinned release, the Full lexicon consists of the exact Small
+word-ID prefix, followed by the Core additions, followed by the Full additions.
+Two manifest boundaries therefore identify the smallest edition containing a
+canonical entry. The invariant and release-time verification are specified in
+[Dictionary Edition Membership](edition-membership.md).
+
 ## 6. Query normalization
 
 At index-generation time, emit aliases for the useful Sudachi forms. At query

@@ -29,12 +29,15 @@ Vite を TypeScript または同等の軽量静的ツールチェーンととも
 
 ```text
 npm run data:sample   Generate or copy the deterministic browser fixture
+npm run data:small:install Install and verify the pinned official Small package
+npm run data:small    Export an installed Small dictionary to a neutral stream
 npm run data:core:install Install and verify the pinned official Core package
 npm run data:core     Export an installed Core dictionary to a neutral stream
 npm run data:core:web Build locally served Core browser shards
 npm run data:full:install Install and verify the pinned official Full package
 npm run data:full     Export an installed Full dictionary to a neutral stream
 npm run data:full:web Build locally served Full browser shards
+npm run data:editions:verify Verify the cumulative Small/Core/Full word-ID ranges
 npm run dev           Start the local HTTP development server
 npm test              Run unit, integrity, and search fixtures
 npm run build         Produce deployable static output
@@ -66,6 +69,8 @@ npm run dev
 ```
 
 完全なコマンドは、同じエクスポーターとブラウザー形式ビルダーを使用します。生成された両方のエディションがローカルに存在する場合、アプリケーションは現在完全を優先します。アセットが使用できなくなると、コアを介してサンプル フィクスチャにフォールバックします。
+
+Fullの本番リリースでは、SmallとCoreも書き出して`npm run data:editions:verify`を実行します。これにより、SmallがCoreの先頭範囲と完全に一致し、CoreがFullの先頭範囲と完全に一致することを確認してから、マニフェストに二つの収録区分境界を記録します。
 
 `file://` を開発環境として使用しないでください。 HTTP サーバーは、モジュール ワーカー、相対的な `fetch` 呼び出し、MIME タイプ、および現実的なアセットの読み込みを実行するために必要です。
 
